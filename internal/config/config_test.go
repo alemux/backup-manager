@@ -14,8 +14,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DataDir != "./data" {
 		t.Errorf("expected default data dir ./data, got %s", cfg.DataDir)
 	}
-	if cfg.DBPath != "./data/backupmanager.db" {
-		t.Errorf("expected default db path, got %s", cfg.DBPath)
+	if cfg.DBPath != "data/backupmanager.db" {
+		t.Errorf("expected default db path data/backupmanager.db, got %s", cfg.DBPath)
 	}
 }
 
