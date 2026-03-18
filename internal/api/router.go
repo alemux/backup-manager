@@ -4,6 +4,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/backupmanager/backupmanager/internal/audit"
 	"github.com/backupmanager/backupmanager/internal/auth"
 	"github.com/backupmanager/backupmanager/internal/database"
 	"github.com/backupmanager/backupmanager/internal/health"
@@ -57,6 +58,8 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	dashboardHandler := NewDashboardHandler(db)
 	integritySvc := integrity.NewIntegrityService(db)
 	integrityHandler := NewIntegrityHandler(integritySvc)
+	auditSvc := audit.NewAuditService(db)
+	auditHandler := NewAuditHandler(auditSvc)
 
 	// Public routes
 	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
@@ -121,6 +124,12 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	protected.HandleFunc("POST /api/integrity/verify-all", integrityHandler.VerifyAll)
 	protected.HandleFunc("GET /api/integrity/status", integrityHandler.Status)
 	mux.Handle("/api/integrity/", authSvc.RequireAuth(protected))
+
+	// Audit log endpoints (protected).
+	protected.HandleFunc("GET /api/audit", auditHandler.List)
+	protected.HandleFunc("GET /api/audit/export", auditHandler.Export)
+	mux.Handle("/api/audit", authSvc.RequireAuth(audit.AuditMiddleware(auditSvc, protected)))
+	mux.Handle("/api/audit/", authSvc.RequireAuth(audit.AuditMiddleware(auditSvc, protected)))
 
 	// WebSocket endpoints — NOT behind RequireAuth middleware.
 	// Auth is handled inside HandleWebSocket via the httpOnly JWT cookie.
