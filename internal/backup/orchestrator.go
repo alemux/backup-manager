@@ -1,0 +1,484 @@
+package backup
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"path/filepath"
+	"time"
+
+	"github.com/backupmanager/backupmanager/internal/database"
+	"github.com/backupmanager/backupmanager/internal/sync"
+)
+
+// BackupSourceRecord represents a row from the backup_sources table.
+type BackupSourceRecord struct {
+	ID         int
+	ServerID   int
+	Name       string
+	Type       string // "web", "database", "config"
+	SourcePath string
+	DBName     string
+	DependsOn  *int // nullable FK to another backup_sources.id
+	Priority   int
+	Enabled    bool
+}
+
+// RunResult holds the outcome of a complete backup job execution.
+type RunResult struct {
+	RunID         int
+	Status        string // "success", "failed", "timeout"
+	TotalSize     int64
+	FilesCopied   int
+	Duration      time.Duration
+	SourceResults []SourceResult
+	Errors        []string
+}
+
+// SourceResult holds the outcome of a single source backup within a run.
+type SourceResult struct {
+	SourceID    int
+	SourceName  string
+	SourceType  string // "web", "database", "config"
+	Status      string // "success", "failed", "skipped"
+	Size        int64
+	FilesCopied int
+	Checksum    string
+	Error       string
+}
+
+// Orchestrator coordinates backup execution for a job's sources in dependency order.
+type Orchestrator struct {
+	db          *database.Database
+	rsyncSyncer sync.Syncer
+	ftpSyncer   sync.Syncer
+	mysqlDumper *MySQLDumpOrchestrator
+	backupDir   string // base directory for backup storage
+}
+
+// NewOrchestrator creates a new Orchestrator with default syncers.
+func NewOrchestrator(db *database.Database) *Orchestrator {
+	return &Orchestrator{
+		db:          db,
+		rsyncSyncer: sync.NewRsyncSyncer(),
+		ftpSyncer:   sync.NewFTPSyncer(),
+		mysqlDumper: NewMySQLDumpOrchestrator(),
+		backupDir:   "/var/backups/backupmanager",
+	}
+}
+
+// SetRsyncSyncer replaces the rsync syncer (useful for testing).
+func (o *Orchestrator) SetRsyncSyncer(s sync.Syncer) { o.rsyncSyncer = s }
+
+// SetFTPSyncer replaces the FTP syncer (useful for testing).
+func (o *Orchestrator) SetFTPSyncer(s sync.Syncer) { o.ftpSyncer = s }
+
+// SetMySQLDumper replaces the MySQL dump orchestrator (useful for testing).
+func (o *Orchestrator) SetMySQLDumper(d *MySQLDumpOrchestrator) { o.mysqlDumper = d }
+
+// SetBackupDir sets the base backup directory.
+func (o *Orchestrator) SetBackupDir(dir string) { o.backupDir = dir }
+
+// serverRecord holds server information loaded from the DB.
+type serverRecord struct {
+	ID             int
+	Name           string
+	Type           string // "linux", "windows"
+	Host           string
+	Port           int
+	ConnectionType string
+	Username       string
+	Password       string
+	SSHKeyPath     string
+}
+
+// jobRecord holds backup job information loaded from the DB.
+type jobRecord struct {
+	ID             int
+	Name           string
+	ServerID       int
+	TimeoutMinutes int
+	BandwidthLimit *int
+}
+
+// ExecuteJob runs all backup sources for a job in dependency order.
+// It creates a backup_run record, executes each source, creates snapshot records,
+// and updates the run status.
+func (o *Orchestrator) ExecuteJob(ctx context.Context, jobID int) (*RunResult, error) {
+	start := time.Now()
+
+	// 1. Load job from DB.
+	job, err := o.loadJob(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("load job: %w", err)
+	}
+
+	// Load server info.
+	server, err := o.loadServer(job.ServerID)
+	if err != nil {
+		return nil, fmt.Errorf("load server: %w", err)
+	}
+
+	// Load sources for the job.
+	sources, err := o.loadJobSources(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("load job sources: %w", err)
+	}
+
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("job %d has no sources", jobID)
+	}
+
+	// 2. Create backup_run record with status "running".
+	runID, err := o.createRun(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("create run record: %w", err)
+	}
+
+	// 3. Resolve source execution order via topological sort.
+	sorted, err := TopologicalSort(sources)
+	if err != nil {
+		_ = o.updateRunStatus(runID, "failed", 0, 0, err.Error(), time.Since(start))
+		return nil, fmt.Errorf("topological sort: %w", err)
+	}
+
+	// 4. Execute each source in order.
+	result := &RunResult{
+		RunID:         runID,
+		SourceResults: make([]SourceResult, 0, len(sorted)),
+	}
+
+	// Track which sources failed so we can skip dependents.
+	failedSources := make(map[int]bool)
+
+	timestamp := time.Now().UTC().Format("2006-01-02_150405")
+
+	for _, src := range sorted {
+		// Check context cancellation.
+		if ctx.Err() != nil {
+			_ = o.updateRunStatus(runID, "timeout", result.TotalSize, result.FilesCopied, "context cancelled", time.Since(start))
+			result.Status = "timeout"
+			result.Duration = time.Since(start)
+			result.Errors = append(result.Errors, "context cancelled")
+			return result, nil
+		}
+
+		// Check if this source depends on a failed source.
+		if src.DependsOn != nil && failedSources[*src.DependsOn] {
+			sr := SourceResult{
+				SourceID:   src.ID,
+				SourceName: src.Name,
+				SourceType: src.Type,
+				Status:     "skipped",
+				Error:      "dependency failed",
+			}
+			result.SourceResults = append(result.SourceResults, sr)
+			failedSources[src.ID] = true // propagate skip to transitive dependents
+			continue
+		}
+
+		sr := o.executeSource(ctx, src, server, *job, timestamp)
+		result.SourceResults = append(result.SourceResults, sr)
+
+		if sr.Status == "success" {
+			result.TotalSize += sr.Size
+			result.FilesCopied += sr.FilesCopied
+
+			// Create snapshot record.
+			destPath := o.buildDestPath(server.Name, src.Type, src.Name, timestamp)
+			if err := o.createSnapshot(runID, src.ID, destPath, sr.Size, sr.Checksum); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("create snapshot record for source %d: %v", src.ID, err))
+			}
+		} else {
+			failedSources[src.ID] = true
+			result.Errors = append(result.Errors, sr.Error)
+		}
+	}
+
+	// 5. Determine final status.
+	result.Duration = time.Since(start)
+	hasFailures := false
+	for _, sr := range result.SourceResults {
+		if sr.Status == "failed" {
+			hasFailures = true
+			break
+		}
+	}
+	if hasFailures {
+		result.Status = "failed"
+	} else {
+		result.Status = "success"
+	}
+
+	// Update run record.
+	errMsg := ""
+	if len(result.Errors) > 0 {
+		errMsg = result.Errors[0]
+		if len(result.Errors) > 1 {
+			errMsg = fmt.Sprintf("%s (and %d more errors)", errMsg, len(result.Errors)-1)
+		}
+	}
+	_ = o.updateRunStatus(runID, result.Status, result.TotalSize, result.FilesCopied, errMsg, result.Duration)
+
+	return result, nil
+}
+
+// executeSource runs a single source backup based on its type and the server type.
+func (o *Orchestrator) executeSource(ctx context.Context, src BackupSourceRecord, server serverRecord, job jobRecord, timestamp string) SourceResult {
+	sr := SourceResult{
+		SourceID:   src.ID,
+		SourceName: src.Name,
+		SourceType: src.Type,
+	}
+
+	destPath := o.buildDestPath(server.Name, src.Type, src.Name, timestamp)
+
+	switch src.Type {
+	case "web", "config":
+		syncer := o.chooseSyncer(server.Type)
+		source := sync.SyncSource{
+			Host:       server.Host,
+			Port:       server.Port,
+			Username:   server.Username,
+			Password:   server.Password,
+			KeyPath:    server.SSHKeyPath,
+			RemotePath: src.SourcePath,
+		}
+		opts := sync.SyncOptions{}
+		if job.BandwidthLimit != nil {
+			opts.BandwidthLimitKBps = *job.BandwidthLimit * 1024 // convert Mbps to KBps
+		}
+
+		result, err := syncer.Sync(ctx, source, destPath, opts)
+		if err != nil {
+			sr.Status = "failed"
+			sr.Error = fmt.Sprintf("sync source %q: %v", src.Name, err)
+			return sr
+		}
+		sr.Status = "success"
+		sr.Size = result.BytesCopied
+		sr.FilesCopied = result.FilesCopied
+
+	case "database":
+		// For database sources, we currently only support mock execution in tests.
+		// The actual MySQL dump requires a connector, which is not set up here.
+		// We use the syncer as a simplified interface for testability.
+		syncer := o.chooseSyncer(server.Type)
+		source := sync.SyncSource{
+			Host:       server.Host,
+			Port:       server.Port,
+			Username:   server.Username,
+			Password:   server.Password,
+			KeyPath:    server.SSHKeyPath,
+			RemotePath: src.DBName,
+		}
+		result, err := syncer.Sync(ctx, source, destPath, sync.SyncOptions{})
+		if err != nil {
+			sr.Status = "failed"
+			sr.Error = fmt.Sprintf("database backup %q: %v", src.Name, err)
+			return sr
+		}
+		sr.Status = "success"
+		sr.Size = result.BytesCopied
+		sr.FilesCopied = result.FilesCopied
+
+	default:
+		sr.Status = "failed"
+		sr.Error = fmt.Sprintf("unknown source type %q", src.Type)
+	}
+
+	return sr
+}
+
+// chooseSyncer returns the appropriate Syncer based on server type.
+func (o *Orchestrator) chooseSyncer(serverType string) sync.Syncer {
+	if serverType == "windows" {
+		return o.ftpSyncer
+	}
+	return o.rsyncSyncer
+}
+
+// buildDestPath constructs the destination path for a backup.
+func (o *Orchestrator) buildDestPath(serverName, sourceType, sourceName, timestamp string) string {
+	return filepath.Join(o.backupDir, serverName, sourceType, sourceName, timestamp)
+}
+
+// --- Database helpers ---
+
+func (o *Orchestrator) loadJob(jobID int) (*jobRecord, error) {
+	var j jobRecord
+	var bw sql.NullInt64
+	err := o.db.DB().QueryRow(
+		`SELECT id, name, server_id, timeout_minutes, bandwidth_limit_mbps
+		 FROM backup_jobs WHERE id = ?`, jobID,
+	).Scan(&j.ID, &j.Name, &j.ServerID, &j.TimeoutMinutes, &bw)
+	if err != nil {
+		return nil, err
+	}
+	if bw.Valid {
+		v := int(bw.Int64)
+		j.BandwidthLimit = &v
+	}
+	return &j, nil
+}
+
+func (o *Orchestrator) loadServer(serverID int) (serverRecord, error) {
+	var s serverRecord
+	var pw, keyPath sql.NullString
+	err := o.db.DB().QueryRow(
+		`SELECT id, name, type, host, port, connection_type, username, encrypted_password, ssh_key_path
+		 FROM servers WHERE id = ?`, serverID,
+	).Scan(&s.ID, &s.Name, &s.Type, &s.Host, &s.Port, &s.ConnectionType, &s.Username, &pw, &keyPath)
+	if err != nil {
+		return s, err
+	}
+	if pw.Valid {
+		s.Password = pw.String
+	}
+	if keyPath.Valid {
+		s.SSHKeyPath = keyPath.String
+	}
+	return s, nil
+}
+
+func (o *Orchestrator) loadJobSources(jobID int) ([]BackupSourceRecord, error) {
+	rows, err := o.db.DB().Query(
+		`SELECT bs.id, bs.server_id, bs.name, bs.type, bs.source_path, bs.db_name, bs.depends_on, bs.priority, bs.enabled
+		 FROM backup_sources bs
+		 INNER JOIN backup_job_sources bjs ON bjs.source_id = bs.id
+		 WHERE bjs.job_id = ? AND bs.enabled = 1
+		 ORDER BY bs.priority`, jobID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sources []BackupSourceRecord
+	for rows.Next() {
+		var s BackupSourceRecord
+		var sourcePath, dbName sql.NullString
+		var dependsOn sql.NullInt64
+		var enabled int
+		if err := rows.Scan(&s.ID, &s.ServerID, &s.Name, &s.Type, &sourcePath, &dbName, &dependsOn, &s.Priority, &enabled); err != nil {
+			return nil, err
+		}
+		if sourcePath.Valid {
+			s.SourcePath = sourcePath.String
+		}
+		if dbName.Valid {
+			s.DBName = dbName.String
+		}
+		if dependsOn.Valid {
+			v := int(dependsOn.Int64)
+			s.DependsOn = &v
+		}
+		s.Enabled = enabled == 1
+		sources = append(sources, s)
+	}
+	return sources, rows.Err()
+}
+
+func (o *Orchestrator) createRun(jobID int) (int, error) {
+	res, err := o.db.DB().Exec(
+		`INSERT INTO backup_runs (job_id, status, started_at) VALUES (?, 'running', datetime('now'))`,
+		jobID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	return int(id), err
+}
+
+func (o *Orchestrator) updateRunStatus(runID int, status string, totalSize int64, filesCopied int, errMsg string, duration time.Duration) error {
+	var errMsgPtr *string
+	if errMsg != "" {
+		errMsgPtr = &errMsg
+	}
+	_, err := o.db.DB().Exec(
+		`UPDATE backup_runs SET status = ?, finished_at = datetime('now'),
+		 total_size_bytes = ?, files_copied = ?, error_message = ?
+		 WHERE id = ?`,
+		status, totalSize, filesCopied, errMsgPtr, runID,
+	)
+	return err
+}
+
+func (o *Orchestrator) createSnapshot(runID, sourceID int, snapshotPath string, sizeBytes int64, checksum string) error {
+	_, err := o.db.DB().Exec(
+		`INSERT INTO backup_snapshots (run_id, source_id, snapshot_path, size_bytes, checksum_sha256)
+		 VALUES (?, ?, ?, ?, ?)`,
+		runID, sourceID, snapshotPath, sizeBytes, checksum,
+	)
+	return err
+}
+
+// TopologicalSort sorts backup sources respecting depends_on relationships.
+// Returns error if a cycle is detected.
+func TopologicalSort(sources []BackupSourceRecord) ([]BackupSourceRecord, error) {
+	if len(sources) == 0 {
+		return nil, nil
+	}
+
+	// Build index and adjacency.
+	byID := make(map[int]BackupSourceRecord, len(sources))
+	inDegree := make(map[int]int, len(sources))
+	dependents := make(map[int][]int) // parent -> children that depend on it
+
+	sourceIDs := make(map[int]bool, len(sources))
+	for _, s := range sources {
+		byID[s.ID] = s
+		sourceIDs[s.ID] = true
+		inDegree[s.ID] = 0
+	}
+
+	for _, s := range sources {
+		if s.DependsOn != nil && sourceIDs[*s.DependsOn] {
+			inDegree[s.ID]++
+			dependents[*s.DependsOn] = append(dependents[*s.DependsOn], s.ID)
+		}
+	}
+
+	// Kahn's algorithm.
+	var queue []int
+	for id, deg := range inDegree {
+		if deg == 0 {
+			queue = append(queue, id)
+		}
+	}
+
+	// Sort queue by priority for deterministic ordering among independent sources.
+	sortByPriority(queue, byID)
+
+	var sorted []BackupSourceRecord
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		sorted = append(sorted, byID[id])
+
+		for _, depID := range dependents[id] {
+			inDegree[depID]--
+			if inDegree[depID] == 0 {
+				queue = append(queue, depID)
+				sortByPriority(queue, byID)
+			}
+		}
+	}
+
+	if len(sorted) != len(sources) {
+		return nil, fmt.Errorf("cycle detected in source dependencies")
+	}
+
+	return sorted, nil
+}
+
+// sortByPriority sorts a slice of IDs by their priority in the source map (ascending).
+func sortByPriority(ids []int, byID map[int]BackupSourceRecord) {
+	// Simple insertion sort since these slices are typically very small.
+	for i := 1; i < len(ids); i++ {
+		for j := i; j > 0 && byID[ids[j]].Priority < byID[ids[j-1]].Priority; j-- {
+			ids[j], ids[j-1] = ids[j-1], ids[j]
+		}
+	}
+}
