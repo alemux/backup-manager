@@ -105,15 +105,15 @@ make clean        # Remove binary and data
 - [x] React frontend shell (login, layout, sidebar, routing)
 - [x] Embedded frontend in single Go binary
 
-### Phase 2: Server Management (next)
-- [ ] Server CRUD API + connection test
-- [ ] SSH connector
-- [ ] FTP connector
-- [ ] Auto-discovery service
-- [ ] Backup sources CRUD
-- [ ] Add Server wizard UI
+### Phase 2: Server Management ✅
+- [x] Server CRUD API + connection test
+- [x] SSH connector (command execution + SFTP)
+- [x] FTP connector (file transfer)
+- [x] Auto-discovery service (NGINX, MySQL, PM2, Certbot, Node.js, Crontab, UFW)
+- [x] Backup sources CRUD with dependency cycle detection
+- [x] Servers UI with Add Server wizard (Linux 6-step / Windows 4-step)
 
-### Phase 3: Backup Engine
+### Phase 3: Backup Engine (next)
 - [ ] Incremental sync (rsync via SSH)
 - [ ] FTP incremental sync with manifest
 - [ ] MySQL dump orchestrator
