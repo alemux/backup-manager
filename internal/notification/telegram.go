@@ -36,6 +36,11 @@ func NewTelegramNotifier(botToken string) *TelegramNotifier {
 	}
 }
 
+// SetAPIBaseURL overrides the Telegram API base URL. Intended for testing only.
+func (t *TelegramNotifier) SetAPIBaseURL(url string) {
+	t.apiBaseURL = url
+}
+
 // telegramPayload is the JSON body sent to the Telegram sendMessage endpoint.
 type telegramPayload struct {
 	ChatID    string `json:"chat_id"`

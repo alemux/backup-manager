@@ -7,18 +7,30 @@ import (
 	"github.com/backupmanager/backupmanager/internal/auth"
 	"github.com/backupmanager/backupmanager/internal/database"
 	"github.com/backupmanager/backupmanager/internal/health"
+	"github.com/backupmanager/backupmanager/internal/notification"
 )
 
 // NewRouter builds and returns the main HTTP router.
 // triggerFn is optional; pass nil to disable the trigger endpoint (e.g. in unit tests
 // that don't exercise it).
+// notificationManager is optional; pass nil to disable notification endpoints.
 func NewRouter(db *database.Database, authSvc *auth.Service, triggerFn ...TriggerFunc) http.Handler {
+	return newRouterWithNotifications(db, authSvc, nil, triggerFn...)
+}
+
+// NewRouterWithNotifications builds and returns the main HTTP router with a notification manager.
+func NewRouterWithNotifications(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, triggerFn ...TriggerFunc) http.Handler {
+	return newRouterWithNotifications(db, authSvc, mgr, triggerFn...)
+}
+
+func newRouterWithNotifications(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, triggerFn ...TriggerFunc) http.Handler {
 	mux := http.NewServeMux()
 	authHandler := NewAuthHandler(db, authSvc)
 	serversHandler := NewServersHandler(db)
 	sourcesHandler := NewSourcesHandler(db)
 	healthSvc := health.NewHealthService(db)
 	healthHandler := NewHealthHandler(healthSvc)
+	notificationsHandler := NewNotificationsHandler(db, mgr)
 
 	var trigger TriggerFunc
 	if len(triggerFn) > 0 {
@@ -72,6 +84,13 @@ func NewRouter(db *database.Database, authSvc *auth.Service, triggerFn ...Trigge
 	protected.HandleFunc("GET /api/health/servers", healthHandler.GetAllHealth)
 	protected.HandleFunc("GET /api/health/servers/{id}/history", healthHandler.GetServerHistory)
 	mux.Handle("/api/health/", authSvc.RequireAuth(protected))
+
+	// Notification endpoints (protected).
+	protected.HandleFunc("GET /api/notifications/config", notificationsHandler.GetConfig)
+	protected.HandleFunc("PUT /api/notifications/config", notificationsHandler.UpdateConfig)
+	protected.HandleFunc("POST /api/notifications/test", notificationsHandler.TestNotification)
+	protected.HandleFunc("GET /api/notifications/log", notificationsHandler.GetLog)
+	mux.Handle("/api/notifications/", authSvc.RequireAuth(protected))
 
 	return mux
 }
