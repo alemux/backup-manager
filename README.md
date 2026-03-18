@@ -123,15 +123,15 @@ make clean        # Remove binary and data
 - [x] Jobs API (CRUD, manual trigger, runs history with pagination)
 - [x] Jobs UI (schedule selector, run history, manual trigger)
 
-### Phase 4: Monitoring & Notifications (next)
-- [ ] Health check system
-- [ ] Telegram notifier
-- [ ] Email notifier (SMTP)
-- [ ] Notification manager
-- [ ] WebSocket real-time updates
-- [ ] Dashboard UI
+### Phase 4: Monitoring & Notifications ✅
+- [x] Health check system (Linux SSH checks + Windows FTP checks, configurable thresholds)
+- [x] Telegram notifier with anti-flood protection
+- [x] Email notifier (SMTP) with HTML templates
+- [x] Notification manager (central dispatcher, config API, test send)
+- [x] WebSocket real-time updates (hub with auto-reconnect)
+- [x] Dashboard UI (live status, backup timeline, disk usage chart, alerts)
 
-### Phase 5: Security & Integrity
+### Phase 5: Security & Integrity (next)
 - [ ] AES-256 encryption at rest
 - [ ] Backup integrity verification
 - [ ] Audit log
