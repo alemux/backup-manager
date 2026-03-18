@@ -28,6 +28,15 @@ func NewService(secret string) *Service {
 	}
 }
 
+// NewServiceWithDuration creates a Service with a custom token duration.
+// Useful for testing refresh behaviour with short-lived tokens.
+func NewServiceWithDuration(secret string, duration time.Duration) *Service {
+	return &Service{
+		secret:        []byte(secret),
+		tokenDuration: duration,
+	}
+}
+
 func HashPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
