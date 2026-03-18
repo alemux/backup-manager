@@ -6,6 +6,7 @@ import (
 
 	"github.com/backupmanager/backupmanager/internal/auth"
 	"github.com/backupmanager/backupmanager/internal/database"
+	"github.com/backupmanager/backupmanager/internal/health"
 )
 
 // NewRouter builds and returns the main HTTP router.
@@ -16,6 +17,8 @@ func NewRouter(db *database.Database, authSvc *auth.Service, triggerFn ...Trigge
 	authHandler := NewAuthHandler(db, authSvc)
 	serversHandler := NewServersHandler(db)
 	sourcesHandler := NewSourcesHandler(db)
+	healthSvc := health.NewHealthService(db)
+	healthHandler := NewHealthHandler(healthSvc)
 
 	var trigger TriggerFunc
 	if len(triggerFn) > 0 {
@@ -64,6 +67,11 @@ func NewRouter(db *database.Database, authSvc *auth.Service, triggerFn ...Trigge
 	mux.Handle("/api/jobs/", authSvc.RequireAuth(protected))
 	mux.Handle("/api/runs", authSvc.RequireAuth(protected))
 	mux.Handle("/api/runs/", authSvc.RequireAuth(protected))
+
+	// Health monitoring endpoints (protected).
+	protected.HandleFunc("GET /api/health/servers", healthHandler.GetAllHealth)
+	protected.HandleFunc("GET /api/health/servers/{id}/history", healthHandler.GetServerHistory)
+	mux.Handle("/api/health/", authSvc.RequireAuth(protected))
 
 	return mux
 }
