@@ -53,6 +53,7 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 		trigger = triggerFn[0]
 	}
 	jobsHandler := NewJobsHandler(db, trigger)
+	dashboardHandler := NewDashboardHandler(db)
 
 	// Public routes
 	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
@@ -100,6 +101,10 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	protected.HandleFunc("GET /api/health/servers", healthHandler.GetAllHealth)
 	protected.HandleFunc("GET /api/health/servers/{id}/history", healthHandler.GetServerHistory)
 	mux.Handle("/api/health/", authSvc.RequireAuth(protected))
+
+	// Dashboard endpoint (protected).
+	protected.HandleFunc("GET /api/dashboard/summary", dashboardHandler.GetSummary)
+	mux.Handle("/api/dashboard/", authSvc.RequireAuth(protected))
 
 	// Notification endpoints (protected).
 	protected.HandleFunc("GET /api/notifications/config", notificationsHandler.GetConfig)
