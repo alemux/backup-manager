@@ -16,16 +16,15 @@ func (d *Database) Migrate() error {
 		return fmt.Errorf("read migration: %w", err)
 	}
 
-	// Check if schema_migrations table exists and migration was already applied
+	// Check if schema_migrations table exists and migration was already applied.
+	// Errors here are non-fatal: if queries fail, we fall through to re-run the
+	// migration which is safe (all statements use IF NOT EXISTS).
 	var tableExists int
-	_ = d.db.QueryRow(
+	if err := d.db.QueryRow(
 		"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'",
-	).Scan(&tableExists)
-
-	if tableExists > 0 {
+	).Scan(&tableExists); err == nil && tableExists > 0 {
 		var count int
-		_ = d.db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = 1").Scan(&count)
-		if count > 0 {
+		if err := d.db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = 1").Scan(&count); err == nil && count > 0 {
 			return nil // Already applied
 		}
 	}
