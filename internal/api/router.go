@@ -33,6 +33,7 @@ func NewRouter(db *database.Database, authSvc *auth.Service) http.Handler {
 	protected.HandleFunc("GET /api/servers/{id}", serversHandler.Get)
 	protected.HandleFunc("PUT /api/servers/{id}", serversHandler.Update)
 	protected.HandleFunc("DELETE /api/servers/{id}", serversHandler.Delete)
+	protected.HandleFunc("POST /api/servers/{id}/discover", serversHandler.Discover)
 
 	mux.Handle("/api/servers", authSvc.RequireAuth(protected))
 	mux.Handle("/api/servers/", authSvc.RequireAuth(protected))

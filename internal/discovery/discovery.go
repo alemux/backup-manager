@@ -1,0 +1,491 @@
+// internal/discovery/discovery.go
+package discovery
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/backupmanager/backupmanager/internal/connector"
+	"github.com/backupmanager/backupmanager/internal/database"
+)
+
+// DiscoveryService detects installed services on a remote Linux server.
+type DiscoveryService struct {
+	db *database.Database
+}
+
+// NewDiscoveryService creates a DiscoveryService backed by the given database.
+func NewDiscoveryService(db *database.Database) *DiscoveryService {
+	return &DiscoveryService{db: db}
+}
+
+// DiscoveredService holds the name and arbitrary data map for one detected service.
+type DiscoveredService struct {
+	Name string                 `json:"name"`
+	Data map[string]interface{} `json:"data"`
+}
+
+// DiscoveryResult is the full scan result for a server.
+type DiscoveryResult struct {
+	ServerID  int                 `json:"server_id"`
+	Services  []DiscoveredService `json:"services"`
+	ScannedAt time.Time           `json:"scanned_at"`
+}
+
+// Discover runs all service detections against the already-connected conn.
+// Each detector is independent: failures are ignored so others still run.
+func (s *DiscoveryService) Discover(ctx context.Context, conn connector.Connector) (*DiscoveryResult, error) {
+	result := &DiscoveryResult{
+		ScannedAt: time.Now().UTC(),
+		Services:  []DiscoveredService{},
+	}
+
+	detectors := []func(context.Context, connector.Connector) *DiscoveredService{
+		detectNGINX,
+		detectMySQL,
+		detectPM2,
+		detectCertbot,
+		detectNode,
+		detectCrontab,
+		detectUFW,
+	}
+
+	for _, detect := range detectors {
+		if svc := detect(ctx, conn); svc != nil {
+			result.Services = append(result.Services, *svc)
+		}
+	}
+
+	return result, nil
+}
+
+// SaveResults persists each discovered service to the discovery_results table.
+func (s *DiscoveryService) SaveResults(serverID int, result *DiscoveryResult) error {
+	now := result.ScannedAt.UTC().Format(time.RFC3339)
+
+	// Delete previous results for this server so we always have fresh data.
+	if _, err := s.db.DB().Exec(
+		"DELETE FROM discovery_results WHERE server_id = ?", serverID,
+	); err != nil {
+		return fmt.Errorf("clear old discovery results: %w", err)
+	}
+
+	for _, svc := range result.Services {
+		dataJSON, err := json.Marshal(svc.Data)
+		if err != nil {
+			return fmt.Errorf("marshal service data for %q: %w", svc.Name, err)
+		}
+		_, err = s.db.DB().Exec(
+			`INSERT INTO discovery_results (server_id, service_name, service_data, discovered_at)
+			 VALUES (?, ?, ?, ?)`,
+			serverID, svc.Name, string(dataJSON), now,
+		)
+		if err != nil {
+			return fmt.Errorf("insert discovery result for %q: %w", svc.Name, err)
+		}
+	}
+	return nil
+}
+
+// run executes a command and returns stdout. Returns ("", false) when the
+// command is not found / exits with a non-zero code.
+func run(ctx context.Context, conn connector.Connector, cmd string) (string, bool) {
+	res, err := conn.RunCommand(ctx, cmd)
+	if err != nil || res.ExitCode != 0 {
+		return "", false
+	}
+	return strings.TrimSpace(res.Stdout), true
+}
+
+// exists checks whether `which <name>` succeeds (binary is in PATH).
+func exists(ctx context.Context, conn connector.Connector, name string) bool {
+	_, ok := run(ctx, conn, "which "+name)
+	return ok
+}
+
+// ── Detectors ────────────────────────────────────────────────────────────────
+
+func detectNGINX(ctx context.Context, conn connector.Connector) *DiscoveredService {
+	if !exists(ctx, conn, "nginx") {
+		return nil
+	}
+
+	version := ""
+	if out, ok := run(ctx, conn, "nginx -v 2>&1"); ok {
+		version = ParseNginxVersion(out)
+	}
+
+	lsOut, _ := run(ctx, conn, "ls /etc/nginx/sites-enabled/")
+	vhosts := ParseNginxVhosts(lsOut)
+
+	grepOut, _ := run(ctx, conn, "grep -r \"root \" /etc/nginx/sites-enabled/")
+	roots := ParseNginxRoots(grepOut)
+
+	// Merge root paths into vhosts.
+	for i, v := range vhosts {
+		if root, ok := roots[v["name"]]; ok {
+			vhosts[i]["root_path"] = root
+		}
+	}
+
+	vhostIface := make([]interface{}, len(vhosts))
+	for i, v := range vhosts {
+		vhostIface[i] = v
+	}
+
+	return &DiscoveredService{
+		Name: "nginx",
+		Data: map[string]interface{}{
+			"version": version,
+			"vhosts":  vhostIface,
+		},
+	}
+}
+
+func detectMySQL(ctx context.Context, conn connector.Connector) *DiscoveredService {
+	if !exists(ctx, conn, "mysql") {
+		return nil
+	}
+
+	version := ""
+	if out, ok := run(ctx, conn, "mysql --version"); ok {
+		version = ParseMySQLVersion(out)
+	}
+
+	return &DiscoveredService{
+		Name: "mysql",
+		Data: map[string]interface{}{
+			"version":   version,
+			"databases": []string{},
+		},
+	}
+}
+
+func detectPM2(ctx context.Context, conn connector.Connector) *DiscoveredService {
+	// pm2 may be installed as a global npm package, not always in a standard PATH.
+	out, ok := run(ctx, conn, "which pm2 || command -v pm2")
+	if !ok || out == "" {
+		return nil
+	}
+
+	jsonOut, _ := run(ctx, conn, "pm2 jlist")
+	procs := ParsePM2Processes(jsonOut)
+
+	return &DiscoveredService{
+		Name: "pm2",
+		Data: map[string]interface{}{
+			"processes": procs,
+		},
+	}
+}
+
+func detectCertbot(ctx context.Context, conn connector.Connector) *DiscoveredService {
+	if !exists(ctx, conn, "certbot") {
+		return nil
+	}
+
+	certOut, _ := run(ctx, conn, "certbot certificates 2>/dev/null")
+	certs := ParseCertbotCerts(certOut)
+
+	return &DiscoveredService{
+		Name: "certbot",
+		Data: map[string]interface{}{
+			"certificates": certs,
+		},
+	}
+}
+
+func detectNode(ctx context.Context, conn connector.Connector) *DiscoveredService {
+	if !exists(ctx, conn, "node") {
+		return nil
+	}
+
+	version := ""
+	if out, ok := run(ctx, conn, "node -v"); ok {
+		version = ParseNodeVersion(out)
+	}
+
+	return &DiscoveredService{
+		Name: "nodejs",
+		Data: map[string]interface{}{
+			"version": version,
+		},
+	}
+}
+
+func detectCrontab(ctx context.Context, conn connector.Connector) *DiscoveredService {
+	out, _ := run(ctx, conn, "crontab -l 2>/dev/null")
+	entries := ParseCrontab(out)
+
+	return &DiscoveredService{
+		Name: "crontab",
+		Data: map[string]interface{}{
+			"entries": entries,
+		},
+	}
+}
+
+func detectUFW(ctx context.Context, conn connector.Connector) *DiscoveredService {
+	if !exists(ctx, conn, "ufw") {
+		return nil
+	}
+
+	ufwOut, _ := run(ctx, conn, "sudo ufw status 2>/dev/null || ufw status 2>/dev/null")
+	status, rules := ParseUFWStatus(ufwOut)
+
+	return &DiscoveredService{
+		Name: "ufw",
+		Data: map[string]interface{}{
+			"status": status,
+			"rules":  rules,
+		},
+	}
+}
+
+// ── Parsing helpers (exported for unit testing) ───────────────────────────────
+
+// ParseNginxVersion extracts the version string from `nginx -v 2>&1` output.
+// nginx -v prints to stderr: "nginx version: nginx/1.18.0"
+func ParseNginxVersion(output string) string {
+	// output may look like: "nginx version: nginx/1.18.0"
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if idx := strings.Index(line, "nginx/"); idx >= 0 {
+			return strings.TrimSpace(line[idx+len("nginx/"):])
+		}
+	}
+	return strings.TrimSpace(output)
+}
+
+// ParseNginxVhosts parses the output of `ls /etc/nginx/sites-enabled/` into a
+// slice of {"name": filename} maps.
+func ParseNginxVhosts(lsOutput string) []map[string]string {
+	var vhosts []map[string]string
+	for _, line := range strings.Split(lsOutput, "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		vhosts = append(vhosts, map[string]string{"name": name, "root_path": ""})
+	}
+	if vhosts == nil {
+		vhosts = []map[string]string{}
+	}
+	return vhosts
+}
+
+// ParseNginxRoots parses the output of `grep -r "root " /etc/nginx/sites-enabled/`
+// and returns a map of vhost-filename → root path.
+// Lines look like: /etc/nginx/sites-enabled/example.com:    root /var/www/example;
+func ParseNginxRoots(grepOutput string) map[string]string {
+	roots := make(map[string]string)
+	for _, line := range strings.Split(grepOutput, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Split on the first colon to get file:content
+		colonIdx := strings.Index(line, ":")
+		if colonIdx < 0 {
+			continue
+		}
+		filePart := line[:colonIdx]
+		content := strings.TrimSpace(line[colonIdx+1:])
+
+		// Extract the filename from the path.
+		parts := strings.Split(filePart, "/")
+		filename := parts[len(parts)-1]
+
+		// Extract the root directive value, strip trailing semicolon.
+		fields := strings.Fields(content)
+		if len(fields) >= 2 && fields[0] == "root" {
+			rootPath := strings.TrimSuffix(fields[1], ";")
+			if _, already := roots[filename]; !already {
+				roots[filename] = rootPath
+			}
+		}
+	}
+	return roots
+}
+
+// ParseMySQLVersion extracts a version from `mysql --version` output.
+// e.g. "mysql  Ver 8.0.33 Distrib 8.0.33, for Linux (x86_64)"
+func ParseMySQLVersion(output string) string {
+	output = strings.TrimSpace(output)
+	fields := strings.Fields(output)
+	// Look for a token that looks like a version number (contains dots and digits).
+	for _, f := range fields {
+		// Strip trailing comma.
+		f = strings.TrimSuffix(f, ",")
+		if looksLikeVersion(f) {
+			return f
+		}
+	}
+	return output
+}
+
+func looksLikeVersion(s string) bool {
+	if s == "" {
+		return false
+	}
+	dots := 0
+	for _, c := range s {
+		if c == '.' {
+			dots++
+		} else if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return dots >= 1
+}
+
+// ParsePM2Processes parses the JSON output of `pm2 jlist`.
+// Each entry should have at minimum: name, pm2_env.pm_cwd, pm2_env.status.
+func ParsePM2Processes(jsonOutput string) []map[string]interface{} {
+	var raw []map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonOutput), &raw); err != nil {
+		return []map[string]interface{}{}
+	}
+
+	procs := make([]map[string]interface{}, 0, len(raw))
+	for _, entry := range raw {
+		name, _ := entry["name"].(string)
+		path := ""
+		status := ""
+		if env, ok := entry["pm2_env"].(map[string]interface{}); ok {
+			path, _ = env["pm_cwd"].(string)
+			status, _ = env["status"].(string)
+		}
+		procs = append(procs, map[string]interface{}{
+			"name":   name,
+			"path":   path,
+			"status": status,
+		})
+	}
+	return procs
+}
+
+// ParseCertbotCerts parses the text output of `certbot certificates`.
+// It extracts domain lists and expiry dates.
+//
+// Example output block:
+//
+//	Certificate Name: example.com
+//	  Domains: example.com www.example.com
+//	  Expiry Date: 2024-06-01 12:00:00+00:00 (VALID: 89 days)
+func ParseCertbotCerts(certOutput string) []map[string]interface{} {
+	var certs []map[string]interface{}
+	var current map[string]interface{}
+
+	for _, line := range strings.Split(certOutput, "\n") {
+		line = strings.TrimSpace(line)
+
+		if strings.HasPrefix(line, "Certificate Name:") {
+			if current != nil {
+				certs = append(certs, current)
+			}
+			current = map[string]interface{}{
+				"domains": []string{},
+				"expiry":  "",
+			}
+			continue
+		}
+
+		if current == nil {
+			continue
+		}
+
+		if strings.HasPrefix(line, "Domains:") {
+			domainsStr := strings.TrimSpace(strings.TrimPrefix(line, "Domains:"))
+			current["domains"] = strings.Fields(domainsStr)
+			continue
+		}
+
+		if strings.HasPrefix(line, "Expiry Date:") {
+			expiryStr := strings.TrimSpace(strings.TrimPrefix(line, "Expiry Date:"))
+			// Strip the "(VALID: ...)" or "(INVALID: ...)" suffix.
+			if idx := strings.Index(expiryStr, " ("); idx >= 0 {
+				expiryStr = strings.TrimSpace(expiryStr[:idx])
+			}
+			current["expiry"] = expiryStr
+		}
+	}
+
+	if current != nil {
+		certs = append(certs, current)
+	}
+
+	if certs == nil {
+		certs = []map[string]interface{}{}
+	}
+	return certs
+}
+
+// ParseNodeVersion returns a cleaned version string from `node -v` output.
+// e.g. "v18.17.0" → "v18.17.0"
+func ParseNodeVersion(versionOutput string) string {
+	return strings.TrimSpace(versionOutput)
+}
+
+// ParseCrontab returns non-empty, non-comment lines from `crontab -l` output.
+func ParseCrontab(crontabOutput string) []string {
+	var entries []string
+	for _, line := range strings.Split(crontabOutput, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		entries = append(entries, trimmed)
+	}
+	if entries == nil {
+		entries = []string{}
+	}
+	return entries
+}
+
+// ParseUFWStatus parses the text output of `ufw status`.
+// Returns the overall status string and a slice of rule lines.
+//
+// Example:
+//
+//	Status: active
+//	To                         Action      From
+//	--                         ------      ----
+//	22/tcp                     ALLOW       Anywhere
+func ParseUFWStatus(ufwOutput string) (string, []string) {
+	status := "unknown"
+	var rules []string
+
+	lines := strings.Split(ufwOutput, "\n")
+	inRules := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "Status:") {
+			status = strings.TrimSpace(strings.TrimPrefix(trimmed, "Status:"))
+			continue
+		}
+
+		// The rules section starts after the "To / Action / From" header line
+		// and the dashes separator line.
+		if strings.HasPrefix(trimmed, "To ") && strings.Contains(trimmed, "Action") {
+			inRules = true
+			continue
+		}
+		if inRules && strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+		if inRules && trimmed != "" {
+			rules = append(rules, trimmed)
+		}
+	}
+
+	if rules == nil {
+		rules = []string{}
+	}
+	return status, rules
+}

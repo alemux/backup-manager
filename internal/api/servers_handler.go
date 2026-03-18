@@ -2,14 +2,18 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/backupmanager/backupmanager/internal/connector"
 	"github.com/backupmanager/backupmanager/internal/database"
+	"github.com/backupmanager/backupmanager/internal/discovery"
 )
 
 // Server represents a server record returned in API responses.
@@ -233,6 +237,78 @@ func (h *ServersHandler) TestConnection(w http.ResponseWriter, r *http.Request) 
 		"success": false,
 		"message": "connection test not yet implemented (requires Task 8/9 connectors)",
 	})
+}
+
+// Discover handles POST /api/servers/{id}/discover
+// It connects to the server via SSH, runs auto-discovery, saves results and
+// returns the DiscoveryResult as JSON.
+func (h *ServersHandler) Discover(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	// Fetch the server row including credentials.
+	type serverRow struct {
+		host           string
+		port           int
+		connectionType string
+		username       string
+		password       sql.NullString
+		sshKeyPath     sql.NullString
+	}
+	var row serverRow
+	err := h.db.DB().QueryRowContext(r.Context(),
+		`SELECT host, port, connection_type, COALESCE(username,''), encrypted_password, ssh_key_path
+		 FROM servers WHERE id=?`, id,
+	).Scan(&row.host, &row.port, &row.connectionType, &row.username, &row.password, &row.sshKeyPath)
+	if err == sql.ErrNoRows {
+		Error(w, http.StatusNotFound, "server not found")
+		return
+	}
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "failed to query server")
+		return
+	}
+
+	if row.connectionType != "ssh" {
+		Error(w, http.StatusBadRequest, "discovery is only supported for SSH servers")
+		return
+	}
+
+	sshCfg := connector.SSHConfig{
+		Host:     row.host,
+		Port:     row.port,
+		Username: row.username,
+	}
+	if row.password.Valid {
+		sshCfg.Password = row.password.String
+	}
+	if row.sshKeyPath.Valid {
+		sshCfg.KeyPath = row.sshKeyPath.String
+	}
+
+	conn := connector.NewSSHConnector(sshCfg)
+	if err := conn.Connect(); err != nil {
+		Error(w, http.StatusBadGateway, fmt.Sprintf("SSH connection failed: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	discoverySvc := discovery.NewDiscoveryService(h.db)
+	result, err := discoverySvc.Discover(context.Background(), conn)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, fmt.Sprintf("discovery failed: %v", err))
+		return
+	}
+	result.ServerID = id
+
+	if err := discoverySvc.SaveResults(id, result); err != nil {
+		// Log the error but still return the result.
+		_ = err
+	}
+
+	JSON(w, http.StatusOK, result)
 }
 
 // --- helpers ---
