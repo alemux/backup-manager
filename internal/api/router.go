@@ -12,6 +12,7 @@ import (
 func NewRouter(db *database.Database, authSvc *auth.Service) http.Handler {
 	mux := http.NewServeMux()
 	authHandler := NewAuthHandler(db, authSvc)
+	serversHandler := NewServersHandler(db)
 
 	// Public routes
 	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
@@ -23,6 +24,18 @@ func NewRouter(db *database.Database, authSvc *auth.Service) http.Handler {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+
+	// Protected routes (require authentication)
+	protected := http.NewServeMux()
+	protected.HandleFunc("GET /api/servers", serversHandler.List)
+	protected.HandleFunc("POST /api/servers", serversHandler.Create)
+	protected.HandleFunc("POST /api/servers/test-connection", serversHandler.TestConnection)
+	protected.HandleFunc("GET /api/servers/{id}", serversHandler.Get)
+	protected.HandleFunc("PUT /api/servers/{id}", serversHandler.Update)
+	protected.HandleFunc("DELETE /api/servers/{id}", serversHandler.Delete)
+
+	mux.Handle("/api/servers", authSvc.RequireAuth(protected))
+	mux.Handle("/api/servers/", authSvc.RequireAuth(protected))
 
 	return mux
 }
