@@ -9,11 +9,19 @@ import (
 )
 
 // NewRouter builds and returns the main HTTP router.
-func NewRouter(db *database.Database, authSvc *auth.Service) http.Handler {
+// triggerFn is optional; pass nil to disable the trigger endpoint (e.g. in unit tests
+// that don't exercise it).
+func NewRouter(db *database.Database, authSvc *auth.Service, triggerFn ...TriggerFunc) http.Handler {
 	mux := http.NewServeMux()
 	authHandler := NewAuthHandler(db, authSvc)
 	serversHandler := NewServersHandler(db)
 	sourcesHandler := NewSourcesHandler(db)
+
+	var trigger TriggerFunc
+	if len(triggerFn) > 0 {
+		trigger = triggerFn[0]
+	}
+	jobsHandler := NewJobsHandler(db, trigger)
 
 	// Public routes
 	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
@@ -40,9 +48,22 @@ func NewRouter(db *database.Database, authSvc *auth.Service) http.Handler {
 	protected.HandleFunc("PUT /api/sources/{id}", sourcesHandler.Update)
 	protected.HandleFunc("DELETE /api/sources/{id}", sourcesHandler.Delete)
 
+	protected.HandleFunc("GET /api/jobs", jobsHandler.List)
+	protected.HandleFunc("POST /api/jobs", jobsHandler.Create)
+	protected.HandleFunc("GET /api/jobs/{id}", jobsHandler.Get)
+	protected.HandleFunc("PUT /api/jobs/{id}", jobsHandler.Update)
+	protected.HandleFunc("DELETE /api/jobs/{id}", jobsHandler.Delete)
+	protected.HandleFunc("POST /api/jobs/{id}/trigger", jobsHandler.Trigger)
+	protected.HandleFunc("GET /api/runs", jobsHandler.ListRuns)
+	protected.HandleFunc("GET /api/runs/{id}/logs", jobsHandler.GetRunLogs)
+
 	mux.Handle("/api/servers", authSvc.RequireAuth(protected))
 	mux.Handle("/api/servers/", authSvc.RequireAuth(protected))
 	mux.Handle("/api/sources/", authSvc.RequireAuth(protected))
+	mux.Handle("/api/jobs", authSvc.RequireAuth(protected))
+	mux.Handle("/api/jobs/", authSvc.RequireAuth(protected))
+	mux.Handle("/api/runs", authSvc.RequireAuth(protected))
+	mux.Handle("/api/runs/", authSvc.RequireAuth(protected))
 
 	return mux
 }
