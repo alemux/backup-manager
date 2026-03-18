@@ -113,16 +113,17 @@ make clean        # Remove binary and data
 - [x] Backup sources CRUD with dependency cycle detection
 - [x] Servers UI with Add Server wizard (Linux 6-step / Windows 4-step)
 
-### Phase 3: Backup Engine (next)
-- [ ] Incremental sync (rsync via SSH)
-- [ ] FTP incremental sync with manifest
-- [ ] MySQL dump orchestrator
-- [ ] Job runner + orchestrator + dependency graph
-- [ ] Scheduler (cron)
-- [ ] Retention policy engine
-- [ ] Jobs API + UI
+### Phase 3: Backup Engine ✅
+- [x] Incremental sync (rsync via SSH with bandwidth limiting)
+- [x] FTP incremental sync with manifest-based change detection + rate limiting
+- [x] MySQL dump orchestrator (remote execution, checksum verification, cleanup)
+- [x] Job runner + orchestrator with dependency graph (topological sort)
+- [x] Cron scheduler with missed backup detection
+- [x] Retention policy engine (daily/weekly/monthly, timezone-aware)
+- [x] Jobs API (CRUD, manual trigger, runs history with pagination)
+- [x] Jobs UI (schedule selector, run history, manual trigger)
 
-### Phase 4: Monitoring & Notifications
+### Phase 4: Monitoring & Notifications (next)
 - [ ] Health check system
 - [ ] Telegram notifier
 - [ ] Email notifier (SMTP)
