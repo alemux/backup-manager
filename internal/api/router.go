@@ -10,20 +10,36 @@ import (
 	"github.com/backupmanager/backupmanager/internal/notification"
 )
 
+// WSHub is the interface that the WebSocket hub must satisfy.
+// Using an interface here avoids a direct import cycle between api and websocket packages.
+type WSHub interface {
+	HandleWebSocket(w http.ResponseWriter, r *http.Request)
+}
+
 // NewRouter builds and returns the main HTTP router.
 // triggerFn is optional; pass nil to disable the trigger endpoint (e.g. in unit tests
 // that don't exercise it).
 // notificationManager is optional; pass nil to disable notification endpoints.
 func NewRouter(db *database.Database, authSvc *auth.Service, triggerFn ...TriggerFunc) http.Handler {
-	return newRouterWithNotifications(db, authSvc, nil, triggerFn...)
+	return newRouterInternal(db, authSvc, nil, nil, triggerFn...)
 }
 
 // NewRouterWithNotifications builds and returns the main HTTP router with a notification manager.
 func NewRouterWithNotifications(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, triggerFn ...TriggerFunc) http.Handler {
-	return newRouterWithNotifications(db, authSvc, mgr, triggerFn...)
+	return newRouterInternal(db, authSvc, mgr, nil, triggerFn...)
 }
 
+// NewRouterWithWebSocket builds and returns the main HTTP router with WebSocket support.
+func NewRouterWithWebSocket(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, hub WSHub, triggerFn ...TriggerFunc) http.Handler {
+	return newRouterInternal(db, authSvc, mgr, hub, triggerFn...)
+}
+
+// newRouterWithNotifications is kept as an internal alias for backward compatibility.
 func newRouterWithNotifications(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, triggerFn ...TriggerFunc) http.Handler {
+	return newRouterInternal(db, authSvc, mgr, nil, triggerFn...)
+}
+
+func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, hub WSHub, triggerFn ...TriggerFunc) http.Handler {
 	mux := http.NewServeMux()
 	authHandler := NewAuthHandler(db, authSvc)
 	serversHandler := NewServersHandler(db)
@@ -91,6 +107,13 @@ func newRouterWithNotifications(db *database.Database, authSvc *auth.Service, mg
 	protected.HandleFunc("POST /api/notifications/test", notificationsHandler.TestNotification)
 	protected.HandleFunc("GET /api/notifications/log", notificationsHandler.GetLog)
 	mux.Handle("/api/notifications/", authSvc.RequireAuth(protected))
+
+	// WebSocket endpoints — NOT behind RequireAuth middleware.
+	// Auth is handled inside HandleWebSocket via the httpOnly JWT cookie.
+	if hub != nil {
+		mux.HandleFunc("/ws/logs", hub.HandleWebSocket)
+		mux.HandleFunc("/ws/status", hub.HandleWebSocket)
+	}
 
 	return mux
 }
