@@ -13,6 +13,7 @@ func NewRouter(db *database.Database, authSvc *auth.Service) http.Handler {
 	mux := http.NewServeMux()
 	authHandler := NewAuthHandler(db, authSvc)
 	serversHandler := NewServersHandler(db)
+	sourcesHandler := NewSourcesHandler(db)
 
 	// Public routes
 	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
@@ -34,9 +35,14 @@ func NewRouter(db *database.Database, authSvc *auth.Service) http.Handler {
 	protected.HandleFunc("PUT /api/servers/{id}", serversHandler.Update)
 	protected.HandleFunc("DELETE /api/servers/{id}", serversHandler.Delete)
 	protected.HandleFunc("POST /api/servers/{id}/discover", serversHandler.Discover)
+	protected.HandleFunc("GET /api/servers/{id}/sources", sourcesHandler.List)
+	protected.HandleFunc("POST /api/servers/{id}/sources", sourcesHandler.Create)
+	protected.HandleFunc("PUT /api/sources/{id}", sourcesHandler.Update)
+	protected.HandleFunc("DELETE /api/sources/{id}", sourcesHandler.Delete)
 
 	mux.Handle("/api/servers", authSvc.RequireAuth(protected))
 	mux.Handle("/api/servers/", authSvc.RequireAuth(protected))
+	mux.Handle("/api/sources/", authSvc.RequireAuth(protected))
 
 	return mux
 }
