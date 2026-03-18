@@ -3,17 +3,21 @@
 BINARY=bin/backupmanager
 GO=go
 
-build: frontend
+build: frontend embed-frontend
 	$(GO) build -o $(BINARY) ./cmd/server
+
+embed-frontend:
+	rm -rf cmd/server/static
+	cp -r frontend/dist cmd/server/static
 
 run:
 	$(GO) run ./cmd/server
 
 test:
-	$(GO) test ./... -v -cover
+	$(GO) test ./cmd/... ./internal/... -v -cover
 
 test-short:
-	$(GO) test ./... -short -v
+	$(GO) test ./cmd/... ./internal/... -short -v
 
 clean:
 	rm -rf $(BINARY) data/

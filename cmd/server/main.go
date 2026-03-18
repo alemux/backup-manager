@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"embed"
 	"encoding/hex"
 	"fmt"
 	"io/fs"
@@ -15,13 +16,15 @@ import (
 	"syscall"
 	"time"
 
-	backupmanager "github.com/backupmanager/backupmanager"
 	"github.com/backupmanager/backupmanager/internal/api"
 	"github.com/backupmanager/backupmanager/internal/auth"
 	"github.com/backupmanager/backupmanager/internal/config"
 	"github.com/backupmanager/backupmanager/internal/database"
 	"github.com/backupmanager/backupmanager/internal/setup"
 )
+
+//go:embed static
+var staticFS embed.FS
 
 func main() {
 	// 1. Load config from environment
@@ -91,7 +94,7 @@ func main() {
 	apiRouter = authSvc.RefreshMiddleware(apiRouter)
 
 	// 9. Serve embedded frontend for non-API/ws routes (SPA fallback)
-	subFS, err := fs.Sub(backupmanager.FrontendFS, "frontend/dist")
+	subFS, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		log.Fatalf("Failed to create frontend sub-filesystem: %v", err)
 	}
