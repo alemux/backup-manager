@@ -4,6 +4,8 @@ import { useAuth } from './hooks/useAuth';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
+import ServersPage from './pages/ServersPage';
+import ServerDetailPage from './pages/ServerDetailPage';
 
 const queryClient = new QueryClient();
 
@@ -29,7 +31,8 @@ function AppRoutes() {
       {isAuthenticated && user ? (
         <Route element={<Layout user={user} onLogout={logout} />}>
           <Route path="/" element={<DashboardPage />} />
-          <Route path="/servers" element={<PlaceholderPage title="Servers" />} />
+          <Route path="/servers" element={<ServersPage />} />
+          <Route path="/servers/:id" element={<ServerDetailPage />} />
           <Route path="/jobs" element={<PlaceholderPage title="Jobs" />} />
           <Route path="/snapshots" element={<PlaceholderPage title="Snapshots" />} />
           <Route path="/recovery" element={<PlaceholderPage title="Recovery" />} />

@@ -15,6 +15,30 @@ export interface Server {
   created_at: string;
 }
 
+export interface BackupSource {
+  id: number;
+  server_id: number;
+  name: string;
+  type: 'web' | 'database' | 'config';
+  source_path?: string;
+  db_name?: string;
+  depends_on?: number;
+  priority: number;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface DiscoveredService {
+  name: string;
+  data: Record<string, unknown>;
+}
+
+export interface DiscoveryResult {
+  server_id: number;
+  services: DiscoveredService[];
+  scanned_at: string;
+}
+
 export interface BackupRun {
   id: number;
   job_id: number;
