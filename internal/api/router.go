@@ -57,6 +57,7 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	}
 	jobsHandler := NewJobsHandler(db, trigger)
 	dashboardHandler := NewDashboardHandler(db)
+	snapshotsHandler := NewSnapshotsHandler(db)
 	integritySvc := integrity.NewIntegrityService(db)
 	integrityHandler := NewIntegrityHandler(integritySvc)
 	auditSvc := audit.NewAuditService(db)
@@ -136,6 +137,14 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	protected.HandleFunc("POST /api/destinations/{id}/retry/{snapshot_id}", destinationsHandler.RetrySync)
 	mux.Handle("/api/destinations", authSvc.RequireAuth(protected))
 	mux.Handle("/api/destinations/", authSvc.RequireAuth(protected))
+
+	// Snapshots endpoints (protected).
+	protected.HandleFunc("GET /api/snapshots/calendar", snapshotsHandler.Calendar)
+	protected.HandleFunc("GET /api/snapshots", snapshotsHandler.List)
+	protected.HandleFunc("GET /api/snapshots/{id}", snapshotsHandler.Get)
+	protected.HandleFunc("GET /api/snapshots/{id}/download", snapshotsHandler.Download)
+	mux.Handle("/api/snapshots", authSvc.RequireAuth(protected))
+	mux.Handle("/api/snapshots/", authSvc.RequireAuth(protected))
 
 	// Audit log endpoints (protected).
 	protected.HandleFunc("GET /api/audit", auditHandler.List)

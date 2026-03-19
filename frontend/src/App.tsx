@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage';
 import ServersPage from './pages/ServersPage';
 import ServerDetailPage from './pages/ServerDetailPage';
 import JobsPage from './pages/JobsPage';
+import SnapshotsPage from './pages/SnapshotsPage';
 
 const queryClient = new QueryClient();
 
@@ -35,7 +36,7 @@ function AppRoutes() {
           <Route path="/servers" element={<ServersPage />} />
           <Route path="/servers/:id" element={<ServerDetailPage />} />
           <Route path="/jobs" element={<JobsPage />} />
-          <Route path="/snapshots" element={<PlaceholderPage title="Snapshots" />} />
+          <Route path="/snapshots" element={<SnapshotsPage />} />
           <Route path="/recovery" element={<PlaceholderPage title="Recovery" />} />
           <Route path="/docs" element={<PlaceholderPage title="Docs" />} />
           <Route path="/assistant" element={<PlaceholderPage title="Assistant" />} />
