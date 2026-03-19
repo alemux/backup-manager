@@ -65,6 +65,12 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	destinationsHandler := NewDestinationsHandler(db)
 	recoveryHandler := NewRecoveryHandler(db)
 	assistantHandler := NewAssistantHandler(db)
+	docsHandler := NewDocsHandler()
+
+	// Public docs routes (no auth required — documentation is publicly readable)
+	mux.HandleFunc("GET /api/docs/search", docsHandler.Search)
+	mux.HandleFunc("GET /api/docs/{slug}", docsHandler.Get)
+	mux.HandleFunc("GET /api/docs", docsHandler.List)
 
 	// Public routes
 	mux.Handle("POST /api/auth/login", RateLimitMiddleware(rateLimiter, http.HandlerFunc(authHandler.Login)))
