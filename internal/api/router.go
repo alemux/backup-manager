@@ -63,6 +63,8 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	auditSvc := audit.NewAuditService(db)
 	auditHandler := NewAuditHandler(auditSvc)
 	destinationsHandler := NewDestinationsHandler(db)
+	settingsHandler := NewSettingsHandler(db)
+	usersHandler := NewUsersHandler(db)
 	recoveryHandler := NewRecoveryHandler(db)
 	assistantHandler := NewAssistantHandler(db)
 	docsHandler := NewDocsHandler()
@@ -167,6 +169,19 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	protected.HandleFunc("GET /api/assistant/conversations", assistantHandler.GetConversations)
 	protected.HandleFunc("DELETE /api/assistant/conversations", assistantHandler.ClearConversations)
 	mux.Handle("/api/assistant/", authSvc.RequireAuth(protected))
+
+	// Settings endpoints (protected).
+	protected.HandleFunc("GET /api/settings", settingsHandler.Get)
+	protected.HandleFunc("PUT /api/settings", settingsHandler.Update)
+	mux.Handle("/api/settings", authSvc.RequireAuth(protected))
+
+	// Users endpoints (protected).
+	protected.HandleFunc("GET /api/users", usersHandler.List)
+	protected.HandleFunc("POST /api/users", usersHandler.Create)
+	protected.HandleFunc("PUT /api/users/{id}", usersHandler.Update)
+	protected.HandleFunc("DELETE /api/users/{id}", usersHandler.Delete)
+	mux.Handle("/api/users", authSvc.RequireAuth(protected))
+	mux.Handle("/api/users/", authSvc.RequireAuth(protected))
 
 	// Audit log endpoints (protected).
 	protected.HandleFunc("GET /api/audit", auditHandler.List)

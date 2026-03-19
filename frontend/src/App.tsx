@@ -11,17 +11,10 @@ import SnapshotsPage from './pages/SnapshotsPage';
 import RecoveryPage from './pages/RecoveryPage';
 import AssistantPage from './pages/AssistantPage';
 import DocsPage from './pages/DocsPage';
+import SettingsPage from './pages/SettingsPage';
+import AuditLogPage from './pages/AuditLogPage';
 
 const queryClient = new QueryClient();
-
-function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold">{title}</h1>
-      <p className="text-gray-500 mt-2">This page is under construction.</p>
-    </div>
-  );
-}
 
 function AppRoutes() {
   const { user, isAuthenticated, logout } = useAuth();
@@ -43,8 +36,8 @@ function AppRoutes() {
           <Route path="/recovery" element={<RecoveryPage />} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/assistant" element={<AssistantPage />} />
-          <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
-          <Route path="/audit" element={<PlaceholderPage title="Audit Log" />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/audit" element={<AuditLogPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       ) : (
