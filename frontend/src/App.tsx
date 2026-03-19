@@ -9,6 +9,7 @@ import ServerDetailPage from './pages/ServerDetailPage';
 import JobsPage from './pages/JobsPage';
 import SnapshotsPage from './pages/SnapshotsPage';
 import RecoveryPage from './pages/RecoveryPage';
+import AssistantPage from './pages/AssistantPage';
 
 const queryClient = new QueryClient();
 
@@ -40,7 +41,7 @@ function AppRoutes() {
           <Route path="/snapshots" element={<SnapshotsPage />} />
           <Route path="/recovery" element={<RecoveryPage />} />
           <Route path="/docs" element={<PlaceholderPage title="Docs" />} />
-          <Route path="/assistant" element={<PlaceholderPage title="Assistant" />} />
+          <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
           <Route path="/audit" element={<PlaceholderPage title="Audit Log" />} />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -64,6 +64,7 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	auditHandler := NewAuditHandler(auditSvc)
 	destinationsHandler := NewDestinationsHandler(db)
 	recoveryHandler := NewRecoveryHandler(db)
+	assistantHandler := NewAssistantHandler(db)
 
 	// Public routes
 	mux.Handle("POST /api/auth/login", RateLimitMiddleware(rateLimiter, http.HandlerFunc(authHandler.Login)))
@@ -154,6 +155,12 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	protected.HandleFunc("PUT /api/recovery/playbooks/{id}", recoveryHandler.UpdatePlaybook)
 	protected.HandleFunc("DELETE /api/recovery/playbooks/{id}", recoveryHandler.DeletePlaybook)
 	mux.Handle("/api/recovery/", authSvc.RequireAuth(protected))
+
+	// Assistant endpoints (protected).
+	protected.HandleFunc("POST /api/assistant/chat", assistantHandler.Chat)
+	protected.HandleFunc("GET /api/assistant/conversations", assistantHandler.GetConversations)
+	protected.HandleFunc("DELETE /api/assistant/conversations", assistantHandler.ClearConversations)
+	mux.Handle("/api/assistant/", authSvc.RequireAuth(protected))
 
 	// Audit log endpoints (protected).
 	protected.HandleFunc("GET /api/audit", auditHandler.List)
