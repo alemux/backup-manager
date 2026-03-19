@@ -138,14 +138,17 @@ make clean        # Remove binary and data
 - [x] CSRF protection (double-submit cookie) + login rate limiting (SQLite-persisted)
 - [x] Credential encryption in database (server passwords, SSH keys)
 
-### Phase 6: Advanced Features (next)
-- [ ] Multi-destination sync
-- [ ] Snapshots UI with calendar
-- [ ] Disaster recovery playbooks
-- [ ] AI assistant
-- [ ] Documentation page
-- [ ] Bandwidth throttling
-- [ ] Startup crash recovery
+### Phase 6: Advanced Features ✅
+- [x] Multi-destination sync with retry and status tracking
+- [x] Snapshots UI with calendar navigation, filters, detail view
+- [x] Disaster recovery playbooks with auto-generation and interactive wizard
+- [x] AI assistant with context-aware LLM integration (OpenAI/Anthropic)
+- [x] Documentation page with full-text search
+- [x] Settings UI (notifications, destinations, encryption, users, general)
+- [x] Audit log UI with filters and CSV export
+- [x] Bandwidth throttling + pre-flight checks + SQLite self-backup
+- [x] Startup crash recovery (stale runs, partial files cleanup)
+- [x] Complete technical documentation (9 docs, ~12,500 words)
 
 ## Documentation
 
