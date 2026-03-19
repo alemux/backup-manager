@@ -45,7 +45,7 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	mux := http.NewServeMux()
 	rateLimiter := NewRateLimiter(db)
 	authHandler := NewAuthHandler(db, authSvc)
-	serversHandler := NewServersHandler(db)
+	serversHandler := NewServersHandlerWithKey(db, authSvc.CredentialKey())
 	sourcesHandler := NewSourcesHandler(db)
 	healthSvc := health.NewHealthService(db)
 	healthHandler := NewHealthHandler(healthSvc)

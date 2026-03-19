@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"time"
 
@@ -62,6 +63,13 @@ func (s *Service) GenerateToken(userID int, username string, isAdmin bool) (stri
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(s.secret)
+}
+
+// CredentialKey derives a 32-byte AES-256 key from the JWT secret using
+// SHA-256. This key is used to encrypt server credentials at rest.
+func (s *Service) CredentialKey() []byte {
+	h := sha256.Sum256(s.secret)
+	return h[:]
 }
 
 func (s *Service) ValidateToken(tokenStr string) (*Claims, error) {

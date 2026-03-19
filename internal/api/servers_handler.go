@@ -45,12 +45,23 @@ type serverRequest struct {
 
 // ServersHandler handles all /api/servers routes.
 type ServersHandler struct {
-	db *database.Database
+	db      *database.Database
+	credMgr *database.CredentialManager
 }
 
-// NewServersHandler constructs a ServersHandler.
+// NewServersHandler constructs a ServersHandler without credential encryption.
+// Prefer NewServersHandlerWithKey for production use.
 func NewServersHandler(db *database.Database) *ServersHandler {
 	return &ServersHandler{db: db}
+}
+
+// NewServersHandlerWithKey constructs a ServersHandler that encrypts/decrypts
+// server credentials using the provided 32-byte AES-256 key.
+func NewServersHandlerWithKey(db *database.Database, credKey []byte) *ServersHandler {
+	return &ServersHandler{
+		db:      db,
+		credMgr: database.NewCredentialManager(credKey),
+	}
 }
 
 // List handles GET /api/servers
@@ -97,12 +108,23 @@ func (h *ServersHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	encPassword, err := h.encryptCred(req.Password)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "failed to encrypt password")
+		return
+	}
+	encSSHKey, err := h.encryptCred(req.SSHKeyPath)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "failed to encrypt ssh key")
+		return
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := h.db.DB().ExecContext(r.Context(),
 		`INSERT INTO servers (name, type, host, port, connection_type, username, encrypted_password, ssh_key_path, status, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unknown', ?, ?)`,
 		req.Name, req.Type, req.Host, req.Port, req.ConnectionType,
-		nullableString(req.Username), nullableString(req.Password), nullableString(req.SSHKeyPath),
+		nullableString(req.Username), nullableString(encPassword), nullableString(encSSHKey),
 		now, now,
 	)
 	if err != nil {
@@ -154,12 +176,23 @@ func (h *ServersHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	encPassword, err := h.encryptCred(req.Password)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "failed to encrypt password")
+		return
+	}
+	encSSHKey, err := h.encryptCred(req.SSHKeyPath)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "failed to encrypt ssh key")
+		return
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := h.db.DB().ExecContext(r.Context(),
 		`UPDATE servers SET name=?, type=?, host=?, port=?, connection_type=?, username=?, encrypted_password=?, ssh_key_path=?, updated_at=?
 		 WHERE id=?`,
 		req.Name, req.Type, req.Host, req.Port, req.ConnectionType,
-		nullableString(req.Username), nullableString(req.Password), nullableString(req.SSHKeyPath),
+		nullableString(req.Username), nullableString(encPassword), nullableString(encSSHKey),
 		now, id,
 	)
 	if err != nil {
@@ -282,10 +315,20 @@ func (h *ServersHandler) Discover(w http.ResponseWriter, r *http.Request) {
 		Username: row.username,
 	}
 	if row.password.Valid {
-		sshCfg.Password = row.password.String
+		decPassword, err := h.decryptCred(row.password.String)
+		if err != nil {
+			Error(w, http.StatusInternalServerError, "failed to decrypt server password")
+			return
+		}
+		sshCfg.Password = decPassword
 	}
 	if row.sshKeyPath.Valid {
-		sshCfg.KeyPath = row.sshKeyPath.String
+		decSSHKey, err := h.decryptCred(row.sshKeyPath.String)
+		if err != nil {
+			Error(w, http.StatusInternalServerError, "failed to decrypt ssh key")
+			return
+		}
+		sshCfg.KeyPath = decSSHKey
 	}
 
 	conn := connector.NewSSHConnector(sshCfg)
@@ -309,6 +352,24 @@ func (h *ServersHandler) Discover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSON(w, http.StatusOK, result)
+}
+
+// encryptCred encrypts plaintext using the handler's CredentialManager.
+// If no CredentialManager is configured, plaintext is returned unchanged.
+func (h *ServersHandler) encryptCred(plaintext string) (string, error) {
+	if h.credMgr == nil || plaintext == "" {
+		return plaintext, nil
+	}
+	return h.credMgr.Encrypt(plaintext)
+}
+
+// decryptCred decrypts ciphertext using the handler's CredentialManager.
+// If no CredentialManager is configured, ciphertext is returned unchanged.
+func (h *ServersHandler) decryptCred(ciphertext string) (string, error) {
+	if h.credMgr == nil || ciphertext == "" {
+		return ciphertext, nil
+	}
+	return h.credMgr.Decrypt(ciphertext)
 }
 
 // --- helpers ---
