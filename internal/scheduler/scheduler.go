@@ -39,6 +39,32 @@ func New(runner RunnerInterface, db *database.Database) *Scheduler {
 	}
 }
 
+// CheckBandwidthWindow checks whether the current time falls within a period
+// where bandwidth-limited jobs should run. For jobs with bandwidth_limit_mbps
+// set, this always returns true (the limit is applied during sync, not here).
+// This function is a hook point for future time-of-day policy enforcement.
+func CheckBandwidthWindow(bandwidthLimitMbps *int) bool {
+	// Current policy: always allow execution regardless of time-of-day.
+	// The bandwidth limit is enforced at the sync layer via SyncOptions.BandwidthLimitKBps.
+	// A future implementation could restrict high-bandwidth jobs to off-peak hours.
+	return true
+}
+
+// StartSQLiteBackup registers a daily cron job that copies the SQLite database
+// file to the given backupDir, keeping the last 7 copies.
+func (s *Scheduler) StartSQLiteBackup(dbPath, backupDir string) {
+	_, err := s.cron.AddFunc("0 3 * * *", func() {
+		if err := backup.BackupSQLiteDB(dbPath, backupDir); err != nil {
+			log.Printf("scheduler: SQLite self-backup failed: %v", err)
+		} else {
+			log.Printf("scheduler: SQLite self-backup completed to %s", backupDir)
+		}
+	})
+	if err != nil {
+		log.Printf("scheduler: failed to register SQLite self-backup job: %v", err)
+	}
+}
+
 // Start loads all enabled jobs from the DB and starts the cron scheduler.
 func (s *Scheduler) Start() error {
 	rows, err := s.db.DB().Query(

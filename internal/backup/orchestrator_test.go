@@ -231,6 +231,7 @@ func TestExecuteJob_CreatesRunRecord(t *testing.T) {
 
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 	orch.SetRsyncSyncer(&MockSyncer{})
 
 	result, err := orch.ExecuteJob(context.Background(), jobID)
@@ -257,6 +258,7 @@ func TestExecuteJob_UpdatesRunStatus(t *testing.T) {
 
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 
 	// Use a syncer that fails.
 	orch.SetRsyncSyncer(&MockSyncer{
@@ -293,6 +295,7 @@ func TestExecuteJob_CreatesSnapshots(t *testing.T) {
 
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 	orch.SetRsyncSyncer(&MockSyncer{})
 
 	result, err := orch.ExecuteJob(context.Background(), jobID)
@@ -342,6 +345,7 @@ func TestExecuteJob_SkipsDependentsOnFailure(t *testing.T) {
 	callCount := 0
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 	orch.SetRsyncSyncer(&MockSyncer{
 		SyncFunc: func(ctx context.Context, source sync.SyncSource, destPath string, opts sync.SyncOptions) (*sync.SyncResult, error) {
 			callCount++
@@ -387,6 +391,7 @@ func TestExecuteJob_WindowsServerUsesFTP(t *testing.T) {
 
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 	orch.SetRsyncSyncer(&MockSyncer{
 		SyncFunc: func(ctx context.Context, source sync.SyncSource, destPath string, opts sync.SyncOptions) (*sync.SyncResult, error) {
 			rsyncCalled = true
@@ -421,6 +426,7 @@ func TestExecuteJob_RunRecordHasSizeAndFiles(t *testing.T) {
 
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 	orch.SetRsyncSyncer(&MockSyncer{
 		SyncFunc: func(ctx context.Context, source sync.SyncSource, destPath string, opts sync.SyncOptions) (*sync.SyncResult, error) {
 			return &sync.SyncResult{FilesCopied: 42, BytesCopied: 98765}, nil
@@ -457,6 +463,7 @@ func TestExecuteJob_FinishedAtIsSet(t *testing.T) {
 
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 	orch.SetRsyncSyncer(&MockSyncer{})
 
 	result, err := orch.ExecuteJob(context.Background(), jobID)

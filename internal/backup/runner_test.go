@@ -43,6 +43,7 @@ func TestRunner_PreventsConcurrentRuns(t *testing.T) {
 
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 	orch.SetRsyncSyncer(&MockSyncer{})
 
 	runner := NewRunner(orch, db)
@@ -73,6 +74,7 @@ func TestRunner_RespectsTimeout(t *testing.T) {
 
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 	// Syncer that blocks and respects context cancellation.
 	orch.SetRsyncSyncer(&MockSyncer{
 		SyncFunc: func(ctx context.Context, source sync.SyncSource, destPath string, opts sync.SyncOptions) (*sync.SyncResult, error) {
@@ -116,6 +118,7 @@ func TestRunner_SuccessfulRun(t *testing.T) {
 
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 	orch.SetRsyncSyncer(&MockSyncer{
 		SyncFunc: func(ctx context.Context, source sync.SyncSource, destPath string, opts sync.SyncOptions) (*sync.SyncResult, error) {
 			return &sync.SyncResult{FilesCopied: 10, BytesCopied: 5000}, nil
@@ -155,6 +158,7 @@ func TestRunner_AllowsRunAfterPreviousCompletes(t *testing.T) {
 
 	orch := NewOrchestrator(db)
 	orch.SetBackupDir(t.TempDir())
+	orch.SetSkipPreflight(true)
 	orch.SetRsyncSyncer(&MockSyncer{})
 
 	runner := NewRunner(orch, db)

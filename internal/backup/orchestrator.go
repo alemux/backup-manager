@@ -49,11 +49,12 @@ type SourceResult struct {
 
 // Orchestrator coordinates backup execution for a job's sources in dependency order.
 type Orchestrator struct {
-	db          *database.Database
-	rsyncSyncer sync.Syncer
-	ftpSyncer   sync.Syncer
-	mysqlDumper *MySQLDumpOrchestrator
-	backupDir   string // base directory for backup storage
+	db             *database.Database
+	rsyncSyncer    sync.Syncer
+	ftpSyncer      sync.Syncer
+	mysqlDumper    *MySQLDumpOrchestrator
+	backupDir      string // base directory for backup storage
+	skipPreflight  bool   // if true, skip pre-flight checks (for testing)
 }
 
 // NewOrchestrator creates a new Orchestrator with default syncers.
@@ -79,6 +80,10 @@ func (o *Orchestrator) SetMySQLDumper(d *MySQLDumpOrchestrator) { o.mysqlDumper 
 // SetBackupDir sets the base backup directory.
 func (o *Orchestrator) SetBackupDir(dir string) { o.backupDir = dir }
 
+// SetSkipPreflight disables pre-flight checks. Intended for unit tests where
+// the server host is not reachable.
+func (o *Orchestrator) SetSkipPreflight(skip bool) { o.skipPreflight = skip }
+
 // serverRecord holds server information loaded from the DB.
 type serverRecord struct {
 	ID             int
@@ -102,8 +107,8 @@ type jobRecord struct {
 }
 
 // ExecuteJob runs all backup sources for a job in dependency order.
-// It creates a backup_run record, executes each source, creates snapshot records,
-// and updates the run status.
+// It runs pre-flight checks first, then creates a backup_run record, executes
+// each source, creates snapshot records, and updates the run status.
 func (o *Orchestrator) ExecuteJob(ctx context.Context, jobID int) (*RunResult, error) {
 	start := time.Now()
 
@@ -127,6 +132,20 @@ func (o *Orchestrator) ExecuteJob(ctx context.Context, jobID int) (*RunResult, e
 
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("job %d has no sources", jobID)
+	}
+
+	// 1a. Run pre-flight checks BEFORE creating the backup_run record.
+	if !o.skipPreflight {
+		preflight := RunPreflight(ctx, o.db, jobID, o.backupDir)
+		if !preflight.Passed {
+			var msgs []string
+			for _, c := range preflight.Checks {
+				if !c.Passed {
+					msgs = append(msgs, fmt.Sprintf("%s: %s", c.Name, c.Message))
+				}
+			}
+			return nil, fmt.Errorf("pre-flight checks failed: %s", joinStrings(msgs, "; "))
+		}
 	}
 
 	// 2. Create backup_run record with status "running".
@@ -471,6 +490,18 @@ func TopologicalSort(sources []BackupSourceRecord) ([]BackupSourceRecord, error)
 	}
 
 	return sorted, nil
+}
+
+// joinStrings joins strings with a separator (avoids importing strings package).
+func joinStrings(parts []string, sep string) string {
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += sep
+		}
+		result += p
+	}
+	return result
 }
 
 // sortByPriority sorts a slice of IDs by their priority in the source map (ascending).
