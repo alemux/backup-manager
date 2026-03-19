@@ -63,6 +63,7 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	auditSvc := audit.NewAuditService(db)
 	auditHandler := NewAuditHandler(auditSvc)
 	destinationsHandler := NewDestinationsHandler(db)
+	recoveryHandler := NewRecoveryHandler(db)
 
 	// Public routes
 	mux.Handle("POST /api/auth/login", RateLimitMiddleware(rateLimiter, http.HandlerFunc(authHandler.Login)))
@@ -145,6 +146,14 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	protected.HandleFunc("GET /api/snapshots/{id}/download", snapshotsHandler.Download)
 	mux.Handle("/api/snapshots", authSvc.RequireAuth(protected))
 	mux.Handle("/api/snapshots/", authSvc.RequireAuth(protected))
+
+	// Recovery playbook endpoints (protected).
+	protected.HandleFunc("GET /api/recovery/playbooks", recoveryHandler.ListPlaybooks)
+	protected.HandleFunc("GET /api/recovery/playbooks/{id}", recoveryHandler.GetPlaybook)
+	protected.HandleFunc("POST /api/recovery/playbooks/generate/{server_id}", recoveryHandler.GeneratePlaybooks)
+	protected.HandleFunc("PUT /api/recovery/playbooks/{id}", recoveryHandler.UpdatePlaybook)
+	protected.HandleFunc("DELETE /api/recovery/playbooks/{id}", recoveryHandler.DeletePlaybook)
+	mux.Handle("/api/recovery/", authSvc.RequireAuth(protected))
 
 	// Audit log endpoints (protected).
 	protected.HandleFunc("GET /api/audit", auditHandler.List)
