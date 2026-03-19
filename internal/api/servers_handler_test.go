@@ -16,6 +16,8 @@ import (
 const testSecret = "test-secret-key-32-bytes-long!!"
 
 // authenticatedRequest creates an HTTP request with a valid JWT cookie for a test user.
+// For state-changing methods (POST, PUT, DELETE), it also sets the CSRF cookie and header
+// so that requests pass the CSRFMiddleware added to the router.
 func authenticatedRequest(t *testing.T, method, path string, body io.Reader, db *database.Database, authSvc *auth.Service) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -47,6 +49,18 @@ func authenticatedRequest(t *testing.T, method, path string, body io.Reader, db 
 	req.AddCookie(&http.Cookie{Name: "token", Value: token})
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+
+	// Add CSRF token for state-changing methods so the CSRFMiddleware passes them through.
+	csrfSafeMethods := map[string]bool{
+		http.MethodGet:     true,
+		http.MethodHead:    true,
+		http.MethodOptions: true,
+	}
+	if !csrfSafeMethods[method] && path != "/api/auth/login" {
+		const testCSRFToken = "test-csrf-token-for-unit-tests"
+		req.AddCookie(&http.Cookie{Name: "csrf_token", Value: testCSRFToken})
+		req.Header.Set("X-CSRF-Token", testCSRFToken)
 	}
 
 	router := NewRouter(db, authSvc)

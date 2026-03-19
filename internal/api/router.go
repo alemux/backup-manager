@@ -43,6 +43,7 @@ func newRouterWithNotifications(db *database.Database, authSvc *auth.Service, mg
 
 func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, hub WSHub, triggerFn ...TriggerFunc) http.Handler {
 	mux := http.NewServeMux()
+	rateLimiter := NewRateLimiter(db)
 	authHandler := NewAuthHandler(db, authSvc)
 	serversHandler := NewServersHandler(db)
 	sourcesHandler := NewSourcesHandler(db)
@@ -62,7 +63,7 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	auditHandler := NewAuditHandler(auditSvc)
 
 	// Public routes
-	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
+	mux.Handle("POST /api/auth/login", RateLimitMiddleware(rateLimiter, http.HandlerFunc(authHandler.Login)))
 	mux.HandleFunc("POST /api/auth/logout", authHandler.Logout)
 	mux.HandleFunc("POST /api/auth/reset-password", authHandler.ResetPassword)
 	mux.HandleFunc("POST /api/auth/reset-password/confirm", authHandler.ConfirmReset)
@@ -138,5 +139,6 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 		mux.HandleFunc("/ws/status", hub.HandleWebSocket)
 	}
 
-	return mux
+	// Wrap the entire mux with CSRF protection
+	return CSRFMiddleware(mux)
 }

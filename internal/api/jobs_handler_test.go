@@ -47,6 +47,18 @@ func jobsAuthRequest(t *testing.T, method, path string, body io.Reader, db *data
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// Add CSRF token for state-changing methods.
+	csrfSafeMethods := map[string]bool{
+		http.MethodGet:     true,
+		http.MethodHead:    true,
+		http.MethodOptions: true,
+	}
+	if !csrfSafeMethods[method] && path != "/api/auth/login" {
+		const testCSRFToken = "test-csrf-token-for-unit-tests"
+		req.AddCookie(&http.Cookie{Name: "csrf_token", Value: testCSRFToken})
+		req.Header.Set("X-CSRF-Token", testCSRFToken)
+	}
+
 	router := NewRouter(db, authSvc, trigger)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
