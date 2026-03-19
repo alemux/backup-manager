@@ -131,14 +131,14 @@ make clean        # Remove binary and data
 - [x] WebSocket real-time updates (hub with auto-reconnect)
 - [x] Dashboard UI (live status, backup timeline, disk usage chart, alerts)
 
-### Phase 5: Security & Integrity (next)
-- [ ] AES-256 encryption at rest
-- [ ] Backup integrity verification
-- [ ] Audit log
-- [ ] CSRF protection + rate limiting
-- [ ] Credential encryption in DB
+### Phase 5: Security & Integrity ✅
+- [x] AES-256-GCM encryption at rest with Argon2id key wrapping
+- [x] Backup integrity verification (checksum + SQL dump validation)
+- [x] Audit log with filtering, pagination, CSV export, middleware
+- [x] CSRF protection (double-submit cookie) + login rate limiting (SQLite-persisted)
+- [x] Credential encryption in database (server passwords, SSH keys)
 
-### Phase 6: Advanced Features
+### Phase 6: Advanced Features (next)
 - [ ] Multi-destination sync
 - [ ] Snapshots UI with calendar
 - [ ] Disaster recovery playbooks
