@@ -61,6 +61,7 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	integrityHandler := NewIntegrityHandler(integritySvc)
 	auditSvc := audit.NewAuditService(db)
 	auditHandler := NewAuditHandler(auditSvc)
+	destinationsHandler := NewDestinationsHandler(db)
 
 	// Public routes
 	mux.Handle("POST /api/auth/login", RateLimitMiddleware(rateLimiter, http.HandlerFunc(authHandler.Login)))
@@ -125,6 +126,16 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	protected.HandleFunc("POST /api/integrity/verify-all", integrityHandler.VerifyAll)
 	protected.HandleFunc("GET /api/integrity/status", integrityHandler.Status)
 	mux.Handle("/api/integrity/", authSvc.RequireAuth(protected))
+
+	// Destinations endpoints (protected).
+	protected.HandleFunc("GET /api/destinations", destinationsHandler.List)
+	protected.HandleFunc("POST /api/destinations", destinationsHandler.Create)
+	protected.HandleFunc("PUT /api/destinations/{id}", destinationsHandler.Update)
+	protected.HandleFunc("DELETE /api/destinations/{id}", destinationsHandler.Delete)
+	protected.HandleFunc("GET /api/destinations/status", destinationsHandler.SyncStatusMatrix)
+	protected.HandleFunc("POST /api/destinations/{id}/retry/{snapshot_id}", destinationsHandler.RetrySync)
+	mux.Handle("/api/destinations", authSvc.RequireAuth(protected))
+	mux.Handle("/api/destinations/", authSvc.RequireAuth(protected))
 
 	// Audit log endpoints (protected).
 	protected.HandleFunc("GET /api/audit", auditHandler.List)
