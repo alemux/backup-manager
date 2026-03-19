@@ -18,6 +18,7 @@ import (
 
 	"github.com/backupmanager/backupmanager/internal/api"
 	"github.com/backupmanager/backupmanager/internal/auth"
+	"github.com/backupmanager/backupmanager/internal/backup"
 	"github.com/backupmanager/backupmanager/internal/config"
 	"github.com/backupmanager/backupmanager/internal/database"
 	"github.com/backupmanager/backupmanager/internal/setup"
@@ -45,6 +46,16 @@ func main() {
 	if err := db.Migrate(); err != nil {
 		log.Printf("ERROR: database migration failed: %v", err)
 		os.Exit(1)
+	}
+
+	// 3a. Recover from any previous crash before starting the scheduler.
+	recoveryResult := backup.RecoverFromCrash(db, cfg.BackupDir)
+	if recoveryResult.RunsRecovered > 0 || recoveryResult.SyncsRecovered > 0 || recoveryResult.FilesCleanedUp > 0 {
+		log.Printf("RecoverFromCrash: runs_recovered=%d syncs_recovered=%d files_cleaned=%d",
+			recoveryResult.RunsRecovered, recoveryResult.SyncsRecovered, recoveryResult.FilesCleanedUp)
+	}
+	for _, e := range recoveryResult.Errors {
+		log.Printf("RecoverFromCrash WARNING: %s", e)
 	}
 
 	// 4. Ensure admin user exists (first-run setup)
