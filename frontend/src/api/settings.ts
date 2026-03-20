@@ -77,7 +77,7 @@ export const settingsApi = {
       method: 'PUT',
       body: JSON.stringify(configs),
     }),
-  testNotification: (data: { channel: string; target: string }) =>
+  testNotification: (data: Record<string, unknown>) =>
     request<{ status: string }>('/api/notifications/test', {
       method: 'POST',
       body: JSON.stringify(data),

@@ -134,7 +134,7 @@ function NotificationsTab() {
   });
 
   const testMutation = useMutation({
-    mutationFn: (payload: { channel: string; target: string }) =>
+    mutationFn: (payload: Record<string, unknown>) =>
       settingsApi.testNotification(payload),
     onSuccess: () => {
       setTestResult('Test notification sent successfully!');
@@ -164,12 +164,14 @@ function NotificationsTab() {
           <Input label="Chat ID" value={telegramChatId} onChange={setTelegramChatId} placeholder="-100123456789" />
         </div>
         <button
-          onClick={() => testMutation.mutate({ channel: 'telegram', target: telegramChatId })}
-          disabled={!telegramChatId || testMutation.isPending}
+          onClick={() => testMutation.mutate({ channel: 'telegram', target: telegramChatId, bot_token: telegramToken })}
+          disabled={!telegramChatId || !telegramToken || testMutation.isPending}
           className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
         >
           {testMutation.isPending ? 'Sending…' : 'Send Test Message'}
         </button>
+        {testResult && <p className="mt-3 text-sm text-green-600">{testResult}</p>}
+        {testError && <p className="mt-3 text-sm text-red-600">{testError}</p>}
       </SectionCard>
 
       {/* Email */}
@@ -182,14 +184,12 @@ function NotificationsTab() {
           <Input label="From Address" value={emailFrom} onChange={setEmailFrom} placeholder="backups@example.com" className="sm:col-span-2" />
         </div>
         <button
-          onClick={() => testMutation.mutate({ channel: 'email', target: emailFrom })}
-          disabled={!emailFrom || testMutation.isPending}
+          onClick={() => testMutation.mutate({ channel: 'email', target: emailFrom, smtp_host: emailHost, smtp_port: parseInt(emailPort) || 587, smtp_user: emailUser, smtp_pass: emailPass, smtp_from: emailFrom })}
+          disabled={!emailFrom || !emailHost || testMutation.isPending}
           className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
         >
           {testMutation.isPending ? 'Sending…' : 'Send Test Email'}
         </button>
-        {testResult && <p className="mt-3 text-sm text-green-600">{testResult}</p>}
-        {testError && <p className="mt-3 text-sm text-red-600">{testError}</p>}
       </SectionCard>
 
       {/* Event toggles */}

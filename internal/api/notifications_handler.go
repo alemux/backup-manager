@@ -48,8 +48,14 @@ type notificationConfigRequest struct {
 
 // testNotificationRequest is the payload for POST /api/notifications/test.
 type testNotificationRequest struct {
-	Channel string `json:"channel"` // "telegram" or "email"
-	Target  string `json:"target"`  // chat ID or email address
+	Channel  string `json:"channel"`   // "telegram" or "email"
+	Target   string `json:"target"`    // chat ID or email address
+	BotToken string `json:"bot_token"` // Telegram bot token (for inline test)
+	SMTPHost string `json:"smtp_host"` // SMTP host (for inline email test)
+	SMTPPort int    `json:"smtp_port"` // SMTP port
+	SMTPUser string `json:"smtp_user"` // SMTP username
+	SMTPPass string `json:"smtp_pass"` // SMTP password
+	SMTPFrom string `json:"smtp_from"` // SMTP from address
 }
 
 // NotificationLogResponse is the JSON shape for a notifications_log row.
@@ -205,9 +211,34 @@ func (h *NotificationsHandler) TestNotification(w http.ResponseWriter, r *http.R
 	var sendErr error
 	switch req.Channel {
 	case "telegram":
-		sendErr = h.manager.TestTelegram(req.Target)
+		if req.BotToken != "" {
+			// Inline test: create a temporary notifier with the provided token
+			tmpNotifier := notification.NewTelegramNotifier(req.BotToken)
+			sendErr = tmpNotifier.Send(req.Target, "✅ *BackupManager* — Telegram test message. Configuration is working correctly.")
+		} else {
+			sendErr = h.manager.TestTelegram(req.Target)
+		}
 	case "email":
-		sendErr = h.manager.TestEmail(req.Target)
+		if req.SMTPHost != "" {
+			// Inline test: create a temporary email notifier with the provided SMTP config
+			port := req.SMTPPort
+			if port == 0 {
+				port = 587
+			}
+			tmpNotifier := notification.NewEmailNotifier(notification.SMTPConfig{
+				Host:     req.SMTPHost,
+				Port:     port,
+				Username: req.SMTPUser,
+				Password: req.SMTPPass,
+				From:     req.SMTPFrom,
+				UseTLS:   port == 465,
+			})
+			subject := "[BackupManager] Test Email"
+			body := "<html><body><h2>BackupManager</h2><p>This is a test email. Your SMTP configuration is working correctly.</p></body></html>"
+			sendErr = tmpNotifier.Send([]string{req.Target}, subject, body)
+		} else {
+			sendErr = h.manager.TestEmail(req.Target)
+		}
 	default:
 		Error(w, http.StatusBadRequest, "channel must be 'telegram' or 'email'")
 		return
