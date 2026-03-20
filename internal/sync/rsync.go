@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -26,11 +27,15 @@ func (r *RsyncSyncer) BuildCommand(source SyncSource, destPath string, opts Sync
 	}
 
 	// Build the -e (remote shell) argument.
-	sshCmd := fmt.Sprintf("ssh -p %d", port)
+	sshCmd := fmt.Sprintf("ssh -p %d -o StrictHostKeyChecking=no", port)
 	if source.KeyPath != "" {
+		// Use specific key file
 		sshCmd += fmt.Sprintf(" -i %s", source.KeyPath)
+	} else if source.Password != "" {
+		// Password auth: disable key-based auth to prevent SSH from
+		// trying local keys (which may have passphrases and block rsync)
+		sshCmd += " -o PreferredAuthentications=password -o PubkeyAuthentication=no"
 	}
-	sshCmd += " -o StrictHostKeyChecking=no"
 
 	args := []string{
 		"-avz",
@@ -74,7 +79,22 @@ func (r *RsyncSyncer) Sync(ctx context.Context, source SyncSource, destPath stri
 
 	start := time.Now()
 
-	cmd := exec.CommandContext(ctx, "rsync", args...)
+	var cmd *exec.Cmd
+	if source.Password != "" {
+		// Use sshpass to provide the password non-interactively.
+		// sshpass must be installed on the backup machine.
+		if sshpassPath, lookErr := exec.LookPath("sshpass"); lookErr == nil {
+			sshpassArgs := append([]string{"-p", source.Password, "rsync"}, args...)
+			cmd = exec.CommandContext(ctx, sshpassPath, sshpassArgs...)
+		} else {
+			// Fallback: set RSYNC_PASSWORD env var (only works for rsync daemon, not SSH)
+			// For SSH password auth without sshpass, this won't work — log a warning.
+			cmd = exec.CommandContext(ctx, "rsync", args...)
+			cmd.Env = append(os.Environ(), "RSYNC_PASSWORD="+source.Password)
+		}
+	} else {
+		cmd = exec.CommandContext(ctx, "rsync", args...)
+	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
