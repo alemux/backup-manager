@@ -100,6 +100,19 @@ func (o *Orchestrator) SetMySQLDumper(d *MySQLDumpOrchestrator) { o.mysqlDumper 
 // SetBackupDir sets the base backup directory.
 func (o *Orchestrator) SetBackupDir(dir string) { o.backupDir = dir }
 
+// loadPrimaryDestPath reads the primary destination path from the destinations table.
+// Falls back to the default backupDir if none is configured.
+func (o *Orchestrator) loadPrimaryDestPath() string {
+	var path string
+	err := o.db.DB().QueryRow(
+		"SELECT path FROM destinations WHERE is_primary = 1 AND enabled = 1 LIMIT 1",
+	).Scan(&path)
+	if err == nil && path != "" {
+		return path
+	}
+	return o.backupDir
+}
+
 // SetSkipPreflight disables pre-flight checks. Intended for unit tests where
 // the server host is not reachable.
 func (o *Orchestrator) SetSkipPreflight(skip bool) { o.skipPreflight = skip }
@@ -343,8 +356,10 @@ func (o *Orchestrator) chooseSyncer(serverType string) sync.Syncer {
 }
 
 // buildDestPath constructs the destination path for a backup.
+// Uses the primary destination from the DB, falling back to the default backupDir.
 func (o *Orchestrator) buildDestPath(serverName, sourceType, sourceName, timestamp string) string {
-	return filepath.Join(o.backupDir, serverName, sourceType, sourceName, timestamp)
+	baseDir := o.loadPrimaryDestPath()
+	return filepath.Join(baseDir, serverName, sourceType, sourceName, timestamp)
 }
 
 // --- Database helpers ---
