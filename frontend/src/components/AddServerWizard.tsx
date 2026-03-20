@@ -243,7 +243,7 @@ export default function AddServerWizard({ onClose }: WizardProps) {
     const redis = getService('redis');
     if (redis && selectedSources['redis']) {
       const rdbPath = (redis.data?.rdb_path as string) || '/var/lib/redis/dump.rdb';
-      sources.push({ name: 'Redis Data', type: 'database', source_path: rdbPath });
+      sources.push({ name: 'Redis Data', type: 'config', source_path: rdbPath });
     }
 
     return sources;
