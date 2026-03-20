@@ -22,6 +22,7 @@ import (
 	"github.com/backupmanager/backupmanager/internal/config"
 	"github.com/backupmanager/backupmanager/internal/database"
 	"github.com/backupmanager/backupmanager/internal/setup"
+	ws "github.com/backupmanager/backupmanager/internal/websocket"
 )
 
 //go:embed static
@@ -98,10 +99,14 @@ func main() {
 	// 6. Create auth service
 	authSvc := auth.NewService(jwtSecret)
 
-	// 7. Create API router
-	apiRouter := api.NewRouter(db, authSvc)
+	// 7. Create WebSocket hub
+	hub := ws.NewHub(authSvc)
+	go hub.Run()
 
-	// 8. Wrap with RefreshMiddleware
+	// 8. Create API router with WebSocket support
+	apiRouter := api.NewRouterWithWebSocket(db, authSvc, nil, hub)
+
+	// 9. Wrap with RefreshMiddleware
 	apiRouter = authSvc.RefreshMiddleware(apiRouter)
 
 	// 9. Serve embedded frontend for non-API/ws routes (SPA fallback)
