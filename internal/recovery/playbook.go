@@ -11,6 +11,7 @@ type Playbook struct {
 	Scenario  string    `json:"scenario"` // "full_server", "single_database", "single_project", "config_only", "certificates"
 	Steps     []Step    `json:"steps"`
 	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Step represents a single recovery step within a playbook.

@@ -15,6 +15,7 @@ import (
 	"github.com/backupmanager/backupmanager/internal/database"
 	"github.com/backupmanager/backupmanager/internal/discovery"
 	"github.com/backupmanager/backupmanager/internal/notification"
+	"github.com/backupmanager/backupmanager/internal/recovery"
 )
 
 // Server represents a server record returned in API responses.
@@ -587,7 +588,12 @@ func (h *ServersHandler) Rescan(w http.ResponseWriter, r *http.Request) {
 		_ = err // Non-fatal: return results anyway.
 	}
 
-	// 5. Notify if changes found.
+	// 5. Auto-regenerate playbooks if changes found.
+	if len(changes) > 0 {
+		h.regeneratePlaybooks(r.Context(), id)
+	}
+
+	// 6. Notify if changes found.
 	if len(changes) > 0 && h.notifyMgr != nil {
 		details := make(map[string]string, len(changes))
 		for i, c := range changes {
@@ -606,6 +612,55 @@ func (h *ServersHandler) Rescan(w http.ResponseWriter, r *http.Request) {
 		"discovery": current,
 		"changes":   changes,
 	})
+}
+
+// regeneratePlaybooks deletes old playbooks for a server and generates fresh ones
+// based on the current backup sources. Called automatically after a rescan detects changes.
+func (h *ServersHandler) regeneratePlaybooks(ctx context.Context, serverID int) {
+	// Load server info
+	var srvName, srvHost string
+	if err := h.db.DB().QueryRowContext(ctx,
+		"SELECT name, host FROM servers WHERE id=?", serverID,
+	).Scan(&srvName, &srvHost); err != nil {
+		return
+	}
+
+	// Load current backup sources
+	rows, err := h.db.DB().QueryContext(ctx,
+		`SELECT id, name, type, COALESCE(source_path,''), COALESCE(db_name,'')
+		 FROM backup_sources WHERE server_id=? AND enabled=1`, serverID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var sources []recovery.SourceInfo
+	for rows.Next() {
+		var s recovery.SourceInfo
+		if err := rows.Scan(&s.ID, &s.Name, &s.Type, &s.SourcePath, &s.DBName); err == nil {
+			sources = append(sources, s)
+		}
+	}
+
+	// Delete old playbooks for this server
+	h.db.DB().ExecContext(ctx, "DELETE FROM recovery_playbooks WHERE server_id=?", serverID)
+
+	// Generate and save new ones
+	generated := recovery.GeneratePlaybooks(recovery.ServerInfo{
+		ID: serverID, Name: srvName, Host: srvHost,
+	}, sources)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, p := range generated {
+		stepsJSON, err := json.Marshal(p.Steps)
+		if err != nil {
+			continue
+		}
+		h.db.DB().ExecContext(ctx,
+			`INSERT INTO recovery_playbooks (server_id, title, scenario, steps, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			serverID, p.Title, p.Scenario, string(stepsJSON), now, now)
+	}
 }
 
 // encryptCred encrypts plaintext using the handler's CredentialManager.

@@ -30,6 +30,7 @@ type playbookRow struct {
 	scenario  string
 	stepsJSON string
 	createdAt string
+	updatedAt string
 }
 
 func (h *RecoveryHandler) rowToPlaybook(row playbookRow) (recovery.Playbook, error) {
@@ -43,6 +44,7 @@ func (h *RecoveryHandler) rowToPlaybook(row playbookRow) (recovery.Playbook, err
 		Scenario:  row.scenario,
 		Steps:     steps,
 		CreatedAt: parseTime(row.createdAt),
+		UpdatedAt: parseTime(row.updatedAt),
 	}
 	if row.serverID.Valid {
 		sid := int(row.serverID.Int64)
@@ -54,7 +56,7 @@ func (h *RecoveryHandler) rowToPlaybook(row playbookRow) (recovery.Playbook, err
 // ListPlaybooks handles GET /api/recovery/playbooks
 func (h *RecoveryHandler) ListPlaybooks(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.DB().QueryContext(r.Context(),
-		`SELECT id, server_id, title, scenario, steps, created_at
+		`SELECT id, server_id, title, scenario, steps, created_at, COALESCE(updated_at, created_at)
 		 FROM recovery_playbooks ORDER BY id ASC`)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "failed to query playbooks")
@@ -65,7 +67,7 @@ func (h *RecoveryHandler) ListPlaybooks(w http.ResponseWriter, r *http.Request) 
 	playbooks := make([]recovery.Playbook, 0)
 	for rows.Next() {
 		var row playbookRow
-		if err := rows.Scan(&row.id, &row.serverID, &row.title, &row.scenario, &row.stepsJSON, &row.createdAt); err != nil {
+		if err := rows.Scan(&row.id, &row.serverID, &row.title, &row.scenario, &row.stepsJSON, &row.createdAt, &row.updatedAt); err != nil {
 			Error(w, http.StatusInternalServerError, "failed to scan playbook")
 			return
 		}
@@ -93,9 +95,9 @@ func (h *RecoveryHandler) GetPlaybook(w http.ResponseWriter, r *http.Request) {
 
 	var row playbookRow
 	err := h.db.DB().QueryRowContext(r.Context(),
-		`SELECT id, server_id, title, scenario, steps, created_at
+		`SELECT id, server_id, title, scenario, steps, created_at, COALESCE(updated_at, created_at)
 		 FROM recovery_playbooks WHERE id=?`, id,
-	).Scan(&row.id, &row.serverID, &row.title, &row.scenario, &row.stepsJSON, &row.createdAt)
+	).Scan(&row.id, &row.serverID, &row.title, &row.scenario, &row.stepsJSON, &row.createdAt, &row.updatedAt)
 	if err == sql.ErrNoRows {
 		Error(w, http.StatusNotFound, "playbook not found")
 		return
@@ -239,8 +241,8 @@ func (h *RecoveryHandler) UpdatePlaybook(w http.ResponseWriter, r *http.Request)
 	// Return the updated playbook
 	var row playbookRow
 	err = h.db.DB().QueryRowContext(r.Context(),
-		`SELECT id, server_id, title, scenario, steps, created_at FROM recovery_playbooks WHERE id=?`, id,
-	).Scan(&row.id, &row.serverID, &row.title, &row.scenario, &row.stepsJSON, &row.createdAt)
+		`SELECT id, server_id, title, scenario, steps, created_at, COALESCE(updated_at, created_at) FROM recovery_playbooks WHERE id=?`, id,
+	).Scan(&row.id, &row.serverID, &row.title, &row.scenario, &row.stepsJSON, &row.createdAt, &row.updatedAt)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "failed to retrieve updated playbook")
 		return
