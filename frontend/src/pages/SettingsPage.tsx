@@ -113,6 +113,7 @@ function NotificationsTab() {
   const [emailUser, setEmailUser] = useState('');
   const [emailPass, setEmailPass] = useState('');
   const [emailFrom, setEmailFrom] = useState('');
+  const [emailTestTo, setEmailTestTo] = useState('');
 
   const [localConfigs, setLocalConfigs] = useState<Record<string, NotificationConfig>>({});
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -181,11 +182,12 @@ function NotificationsTab() {
           <Input label="Port" value={emailPort} onChange={setEmailPort} placeholder="587" />
           <Input label="Username" value={emailUser} onChange={setEmailUser} placeholder="user@example.com" />
           <Input label="Password" type="password" value={emailPass} onChange={setEmailPass} placeholder="••••••••" />
-          <Input label="From Address" value={emailFrom} onChange={setEmailFrom} placeholder="backups@example.com" className="sm:col-span-2" />
+          <Input label="From Address" value={emailFrom} onChange={setEmailFrom} placeholder="backups@example.com" />
+          <Input label="Test Recipient" value={emailTestTo} onChange={setEmailTestTo} placeholder="you@example.com" />
         </div>
         <button
-          onClick={() => testMutation.mutate({ channel: 'email', target: emailFrom, smtp_host: emailHost, smtp_port: parseInt(emailPort) || 587, smtp_user: emailUser, smtp_pass: emailPass, smtp_from: emailFrom })}
-          disabled={!emailFrom || !emailHost || testMutation.isPending}
+          onClick={() => testMutation.mutate({ channel: 'email', target: emailTestTo, smtp_host: emailHost, smtp_port: parseInt(emailPort) || 587, smtp_user: emailUser, smtp_pass: emailPass, smtp_from: emailFrom })}
+          disabled={!emailTestTo || !emailHost || !emailFrom || testMutation.isPending}
           className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
         >
           {testMutation.isPending ? 'Sending…' : 'Send Test Email'}
