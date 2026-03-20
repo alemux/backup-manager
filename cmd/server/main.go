@@ -108,8 +108,41 @@ func main() {
 	autoScanner := discovery.NewAutoScanner(db, authSvc.CredentialKey(), 0)
 	autoScanner.Start()
 
-	// 8. Create API router with WebSocket support
-	apiRouter := api.NewRouterWithWebSocket(db, authSvc, nil, hub)
+	// 8. Create backup orchestrator and runner for job triggering
+	orchestrator := backup.NewOrchestrator(db)
+	orchestrator.SetSkipPreflight(false)
+	runner := backup.NewRunner(orchestrator, db)
+
+	triggerFn := func(jobID int) (int, error) {
+		// Create a pending run record and return its ID immediately
+		now := time.Now().UTC().Format(time.RFC3339)
+		result, err := db.DB().Exec(
+			`INSERT INTO backup_runs (job_id, status, started_at, created_at) VALUES (?, 'pending', ?, ?)`,
+			jobID, now, now,
+		)
+		if err != nil {
+			return 0, fmt.Errorf("failed to create run record: %w", err)
+		}
+		runID64, _ := result.LastInsertId()
+		runID := int(runID64)
+
+		// Run backup in background goroutine
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+			defer cancel()
+			runResult, err := runner.Run(ctx, jobID)
+			if err != nil {
+				log.Printf("Backup job %d failed: %v", jobID, err)
+			} else {
+				log.Printf("Backup job %d completed: status=%s, size=%d", jobID, runResult.Status, runResult.TotalSize)
+			}
+		}()
+
+		return runID, nil
+	}
+
+	// 8a. Create API router with WebSocket support and trigger function
+	apiRouter := api.NewRouterWithWebSocket(db, authSvc, nil, hub, triggerFn)
 
 	// 9. Wrap with RefreshMiddleware
 	apiRouter = authSvc.RefreshMiddleware(apiRouter)
