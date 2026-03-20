@@ -160,6 +160,9 @@ export default function AddServerWizard({ onClose }: WizardProps) {
           port: parseInt(conn.port),
           type: 'linux',
           connection_type: 'ssh',
+          username: conn.username,
+          password: conn.password,
+          ssh_key_path: conn.authMethod === 'key' ? conn.privateKey : undefined,
           status: 'unknown',
         } as never);
         // create sources from selected
@@ -174,6 +177,8 @@ export default function AddServerWizard({ onClose }: WizardProps) {
           port: parseInt(winConn.port),
           type: 'windows',
           connection_type: 'ftp',
+          username: winConn.username,
+          password: winConn.password,
           status: 'unknown',
         } as never);
         for (const src of manualSources.filter((s) => s.name && s.source_path)) {

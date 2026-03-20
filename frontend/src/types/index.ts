@@ -11,6 +11,9 @@ export interface Server {
   host: string;
   port: number;
   connection_type: 'ssh' | 'ftp';
+  username?: string;
+  password?: string;       // only used on create/update, never returned
+  ssh_key_path?: string;   // only used on create/update, never returned
   status: 'online' | 'offline' | 'warning' | 'unknown';
   created_at: string;
 }
