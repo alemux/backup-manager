@@ -11,6 +11,24 @@ import (
 	"github.com/backupmanager/backupmanager/internal/sync"
 )
 
+// defaultExcludes lists directories and files that should never be backed up.
+// These are regenerable artifacts that waste space and bandwidth.
+var defaultExcludes = []string{
+	"node_modules",
+	".git",
+	"__pycache__",
+	".cache",
+	".npm",
+	".next",
+	"vendor",       // PHP composer, Go vendor (if committed separately)
+	"dist",         // build output
+	"build",        // build output
+	".env",         // secrets — should not be in backups
+	"*.log",        // log files
+	"*.tmp",
+	"*.swp",
+}
+
 // BackupSourceRecord represents a row from the backup_sources table.
 type BackupSourceRecord struct {
 	ID         int
@@ -263,7 +281,9 @@ func (o *Orchestrator) executeSource(ctx context.Context, src BackupSourceRecord
 			KeyPath:    server.SSHKeyPath,
 			RemotePath: src.SourcePath,
 		}
-		opts := sync.SyncOptions{}
+		opts := sync.SyncOptions{
+			Exclude: defaultExcludes,
+		}
 		if job.BandwidthLimit != nil {
 			opts.BandwidthLimitKBps = *job.BandwidthLimit * 1024 // convert Mbps to KBps
 		}
