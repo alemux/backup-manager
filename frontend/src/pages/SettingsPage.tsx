@@ -311,8 +311,12 @@ function DestinationsTab() {
     queryFn: settingsApi.getDestinations,
   });
 
+  const primaryDest = destinations.find((d) => d.is_primary);
+  const secondaryDests = destinations.filter((d) => !d.is_primary);
+
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
+  const [formIsPrimary, setFormIsPrimary] = useState(false);
   const [form, setForm] = useState({
     name: '',
     type: 'local' as Destination['type'],
@@ -328,6 +332,7 @@ function DestinationsTab() {
     setForm({ name: '', type: 'local', path: '', retention_daily: '7', retention_weekly: '4', retention_monthly: '3', is_primary: false, enabled: true });
     setEditId(null);
     setShowForm(false);
+    setFormIsPrimary(false);
   }
 
   function startEdit(dest: Destination) {
@@ -342,6 +347,19 @@ function DestinationsTab() {
       enabled: dest.enabled,
     });
     setEditId(dest.id);
+    setFormIsPrimary(dest.is_primary);
+    setShowForm(true);
+  }
+
+  function startAddPrimary() {
+    resetForm();
+    setForm((f) => ({ ...f, name: 'Primary Backup Storage', is_primary: true }));
+    setFormIsPrimary(true);
+    setShowForm(true);
+  }
+
+  function startAddSecondary() {
+    resetForm();
     setShowForm(true);
   }
 
@@ -369,7 +387,7 @@ function DestinationsTab() {
       retention_daily: Number(form.retention_daily),
       retention_weekly: Number(form.retention_weekly),
       retention_monthly: Number(form.retention_monthly),
-      is_primary: form.is_primary,
+      is_primary: formIsPrimary || form.is_primary,
       enabled: form.enabled,
     };
     if (editId !== null) {
@@ -383,94 +401,151 @@ function DestinationsTab() {
   const saveError = (createMutation.error || updateMutation.error) as Error | null;
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <button
-          onClick={() => { resetForm(); setShowForm(true); }}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4" /> Add Destination
-        </button>
+    <div className="space-y-6">
+      {/* Explanation */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
+        <p className="font-semibold mb-1">Come funziona lo storage dei backup</p>
+        <p>
+          La <strong>Destinazione Primaria</strong> è dove BackupManager salva i backup dai tuoi server.
+          Deve essere un disco con spazio sufficiente (es. un disco dedicato montato su <code className="bg-blue-100 px-1 rounded">/mnt/backup</code>).
+        </p>
+        <p className="mt-1">
+          Le <strong>Destinazioni Secondarie</strong> sono copie aggiuntive: un NAS in rete, un disco USB esterno, o un cloud storage.
+          BackupManager copia automaticamente ogni backup dalla primaria alle secondarie dopo ogni esecuzione.
+        </p>
       </div>
 
       {isLoading ? (
         <div className="flex justify-center py-10">
           <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
         </div>
-      ) : destinations.length === 0 && !showForm ? (
-        <div className="text-center py-12 text-gray-400">
-          <HardDrive className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-          <p className="text-sm">No destinations configured yet.</p>
-        </div>
       ) : (
-        <div className="space-y-3">
-          {destinations.map((dest) => (
-            <div key={dest.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-gray-800 text-sm">{dest.name}</span>
-                  <Badge color={DEST_TYPE_COLORS[dest.type] || 'gray'}>{dest.type}</Badge>
-                  {dest.is_primary && <Badge color="green">Primary</Badge>}
-                  {!dest.enabled && <Badge color="gray">Disabled</Badge>}
+        <>
+          {/* ─── Primary Destination ─── */}
+          <SectionCard title="Destinazione Primaria">
+            {primaryDest ? (
+              <div className="flex items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-gray-800">{primaryDest.name}</span>
+                    <Badge color="green">Primaria</Badge>
+                    <Badge color={DEST_TYPE_COLORS[primaryDest.type] || 'gray'}>{primaryDest.type.toUpperCase()}</Badge>
+                  </div>
+                  <p className="text-sm text-gray-600 mt-1 font-mono">{primaryDest.path}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Retention: {primaryDest.retention_daily} giorni / {primaryDest.retention_weekly} settimane / {primaryDest.retention_monthly} mesi
+                  </p>
                 </div>
-                <p className="text-xs text-gray-400 mt-0.5 truncate">{dest.path}</p>
-                <p className="text-xs text-gray-400">
-                  Retention: {dest.retention_daily}d / {dest.retention_weekly}w / {dest.retention_monthly}m
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => startEdit(dest)}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                  onClick={() => startEdit(primaryDest)}
+                  className="px-3 py-1.5 text-sm font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50"
                 >
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => { if (confirm('Delete this destination?')) deleteMutation.mutate(dest.id); }}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
-                >
-                  <Trash2 className="w-4 h-4" />
+                  Modifica
                 </button>
               </div>
-            </div>
-          ))}
-        </div>
+            ) : (
+              <div className="text-center py-6">
+                <HardDrive className="w-8 h-8 mx-auto mb-2 text-amber-400" />
+                <p className="text-sm text-gray-600 mb-1">Nessuna destinazione primaria configurata</p>
+                <p className="text-xs text-gray-400 mb-3">I backup vengono attualmente salvati nella cartella di default del programma.</p>
+                <button
+                  onClick={startAddPrimary}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  <Plus className="w-4 h-4" /> Configura Destinazione Primaria
+                </button>
+              </div>
+            )}
+          </SectionCard>
+
+          {/* ─── Secondary Destinations ─── */}
+          <SectionCard title="Destinazioni Secondarie (copie aggiuntive)">
+            <p className="text-xs text-gray-500 mb-4">
+              Dopo ogni backup, i dati vengono copiati automaticamente su queste destinazioni.
+              Ogni destinazione ha la sua policy di retention indipendente.
+            </p>
+
+            {secondaryDests.length === 0 ? (
+              <div className="text-center py-6 border border-dashed border-gray-200 rounded-lg">
+                <p className="text-sm text-gray-400 mb-2">Nessuna destinazione secondaria.</p>
+                <p className="text-xs text-gray-400 mb-3">Aggiungi un NAS, un disco USB o un cloud storage per avere copie ridondanti.</p>
+              </div>
+            ) : (
+              <div className="space-y-3 mb-4">
+                {secondaryDests.map((dest) => (
+                  <div key={dest.id} className="bg-gray-50 rounded-lg border border-gray-100 p-3 flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-gray-800 text-sm">{dest.name}</span>
+                        <Badge color={DEST_TYPE_COLORS[dest.type] || 'gray'}>{dest.type.toUpperCase()}</Badge>
+                        {!dest.enabled && <Badge color="gray">Disabilitata</Badge>}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5 font-mono truncate">{dest.path}</p>
+                      <p className="text-xs text-gray-400">
+                        Retention: {dest.retention_daily}g / {dest.retention_weekly}s / {dest.retention_monthly}m
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => startEdit(dest)} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => { if (confirm('Eliminare questa destinazione?')) deleteMutation.mutate(dest.id); }} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={startAddSecondary}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4" /> Aggiungi Destinazione Secondaria
+            </button>
+          </SectionCard>
+        </>
       )}
 
-      {/* Form */}
+      {/* ─── Add/Edit Form ─── */}
       {showForm && (
         <div className="bg-white rounded-xl border border-blue-200 shadow-sm p-6">
           <h3 className="text-base font-semibold text-gray-800 mb-4">
-            {editId !== null ? 'Edit Destination' : 'Add Destination'}
+            {editId !== null ? 'Modifica Destinazione' : formIsPrimary ? 'Configura Destinazione Primaria' : 'Aggiungi Destinazione Secondaria'}
           </h3>
+          {formIsPrimary && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 mb-4">
+              Scegli un percorso su un disco con molto spazio disponibile. Tutti i backup verranno salvati qui.
+              Esempio: <code className="bg-amber-100 px-1 rounded">/mnt/backup</code> oppure <code className="bg-amber-100 px-1 rounded">/media/backup-disk</code>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input label="Name" value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="My Backup Drive" />
+            <Input label="Nome" value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} placeholder={formIsPrimary ? "Disco Backup Principale" : "NAS Ufficio"} />
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
               <select
                 value={form.type}
                 onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as Destination['type'] }))}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {['local', 'nas', 'usb', 's3'].map((t) => (
-                  <option key={t} value={t}>{t.toUpperCase()}</option>
+                {(formIsPrimary ? ['local'] : ['local', 'nas', 'usb', 's3']).map((t) => (
+                  <option key={t} value={t}>{t === 'local' ? 'Disco Locale' : t === 'nas' ? 'NAS (rete)' : t === 'usb' ? 'Disco USB' : 'Cloud (S3)'}</option>
                 ))}
               </select>
             </div>
-            <Input label="Path" value={form.path} onChange={(v) => setForm((f) => ({ ...f, path: v }))} placeholder="/mnt/backup" className="sm:col-span-2" />
-            <Input label="Retention Daily" value={form.retention_daily} onChange={(v) => setForm((f) => ({ ...f, retention_daily: v }))} />
-            <Input label="Retention Weekly" value={form.retention_weekly} onChange={(v) => setForm((f) => ({ ...f, retention_weekly: v }))} />
-            <Input label="Retention Monthly" value={form.retention_monthly} onChange={(v) => setForm((f) => ({ ...f, retention_monthly: v }))} />
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                <input type="checkbox" checked={form.is_primary} onChange={(e) => setForm((f) => ({ ...f, is_primary: e.target.checked }))} className="w-4 h-4 accent-blue-600" />
-                Primary destination
-              </label>
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                <input type="checkbox" checked={form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} className="w-4 h-4 accent-blue-600" />
-                Enabled
-              </label>
-            </div>
+            <Input label="Percorso" value={form.path} onChange={(v) => setForm((f) => ({ ...f, path: v }))} placeholder={formIsPrimary ? "/mnt/backup" : "/mnt/nas/backups"} className="sm:col-span-2" />
+            <Input label="Retention giornaliera (giorni)" value={form.retention_daily} onChange={(v) => setForm((f) => ({ ...f, retention_daily: v }))} />
+            <Input label="Retention settimanale (settimane)" value={form.retention_weekly} onChange={(v) => setForm((f) => ({ ...f, retention_weekly: v }))} />
+            <Input label="Retention mensile (mesi)" value={form.retention_monthly} onChange={(v) => setForm((f) => ({ ...f, retention_monthly: v }))} />
+            {!formIsPrimary && (
+              <div className="flex items-center">
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} className="w-4 h-4 accent-blue-600" />
+                  Abilitata
+                </label>
+              </div>
+            )}
           </div>
 
           {saveError && <p className="mt-3 text-sm text-red-600">{saveError.message}</p>}
@@ -481,13 +556,13 @@ function DestinationsTab() {
               disabled={isSaving}
               className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
-              {isSaving ? 'Saving…' : (editId !== null ? 'Update' : 'Create')}
+              {isSaving ? 'Salvataggio…' : (editId !== null ? 'Aggiorna' : 'Salva')}
             </button>
             <button
               onClick={resetForm}
               className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
             >
-              Cancel
+              Annulla
             </button>
           </div>
         </div>
