@@ -225,6 +225,12 @@ func extractVhostNames(data map[string]interface{}) []string {
 				}
 			}
 		}
+	case []map[string]string:
+		for _, m := range v {
+			if n, ok := m["name"]; ok && n != "" {
+				names = append(names, n)
+			}
+		}
 	}
 	return names
 }
@@ -254,19 +260,29 @@ func extractProcessMap(data map[string]interface{}) map[string]string {
 	if !ok {
 		return result
 	}
-	items, ok := raw.([]interface{})
-	if !ok {
-		return result
-	}
-	for _, item := range items {
-		m, ok := item.(map[string]interface{})
-		if !ok {
-			continue
+
+	// Handle both []interface{} (from JSON unmarshal/DB) and
+	// []map[string]interface{} (from fresh discovery).
+	switch items := raw.(type) {
+	case []interface{}:
+		for _, item := range items {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			name, _ := m["name"].(string)
+			status, _ := m["status"].(string)
+			if name != "" {
+				result[name] = status
+			}
 		}
-		name, _ := m["name"].(string)
-		status, _ := m["status"].(string)
-		if name != "" {
-			result[name] = status
+	case []map[string]interface{}:
+		for _, m := range items {
+			name, _ := m["name"].(string)
+			status, _ := m["status"].(string)
+			if name != "" {
+				result[name] = status
+			}
 		}
 	}
 	return result
