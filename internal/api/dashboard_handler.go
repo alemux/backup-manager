@@ -207,10 +207,32 @@ func (h *DashboardHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- disk usage ---
+	// --- disk usage (from configured destinations) ---
 	diskUsage := make([]dashboardDiskUsage, 0)
-	du := getDiskUsage("/")
-	diskUsage = append(diskUsage, du)
+	destRows, err := h.db.DB().QueryContext(ctx,
+		`SELECT name, path, is_primary FROM destinations WHERE enabled = 1 ORDER BY is_primary DESC, id ASC`)
+	if err == nil {
+		for destRows.Next() {
+			var name, path string
+			var isPrimary int
+			if err := destRows.Scan(&name, &path, &isPrimary); err == nil {
+				du := getDiskUsage(path)
+				label := name
+				if isPrimary != 0 {
+					label = name + " (Primaria)"
+				}
+				du.Path = label + " — " + path
+				diskUsage = append(diskUsage, du)
+			}
+		}
+		destRows.Close()
+	}
+	// If no destinations configured, show the system disk as fallback
+	if len(diskUsage) == 0 {
+		du := getDiskUsage(".")
+		du.Path = "Sistema (nessuna destinazione configurata)"
+		diskUsage = append(diskUsage, du)
+	}
 
 	// --- alerts ---
 	alerts := make([]dashboardAlert, 0)
