@@ -46,6 +46,7 @@ func (s *DiscoveryService) Discover(ctx context.Context, conn connector.Connecto
 	detectors := []func(context.Context, connector.Connector) *DiscoveredService{
 		detectNGINX,
 		detectMySQL,
+		detectRedis,
 		detectPM2,
 		detectCertbot,
 		detectNode,
@@ -160,6 +161,48 @@ func detectMySQL(ctx context.Context, conn connector.Connector) *DiscoveredServi
 		Data: map[string]interface{}{
 			"version":   version,
 			"databases": []string{},
+		},
+	}
+}
+
+func detectRedis(ctx context.Context, conn connector.Connector) *DiscoveredService {
+	if !exists(ctx, conn, "redis-server") {
+		return nil
+	}
+
+	version := ""
+	if out, ok := run(ctx, conn, "redis-server --version"); ok {
+		version = ParseRedisVersion(out)
+	}
+
+	// Get RDB file path and database count
+	rdbPath := ""
+	dbCount := 0
+	if out, ok := run(ctx, conn, "redis-cli CONFIG GET dir 2>/dev/null"); ok {
+		rdbPath = ParseRedisConfigValue(out)
+	}
+	if rdbFile, ok := run(ctx, conn, "redis-cli CONFIG GET dbfilename 2>/dev/null"); ok {
+		if file := ParseRedisConfigValue(rdbFile); file != "" && rdbPath != "" {
+			rdbPath = rdbPath + "/" + file
+		}
+	}
+	if out, ok := run(ctx, conn, "redis-cli INFO keyspace 2>/dev/null"); ok {
+		dbCount = ParseRedisDBCount(out)
+	}
+
+	// Check if Redis is responding
+	status := "unknown"
+	if out, ok := run(ctx, conn, "redis-cli ping 2>/dev/null"); ok && strings.Contains(out, "PONG") {
+		status = "running"
+	}
+
+	return &DiscoveredService{
+		Name: "redis",
+		Data: map[string]interface{}{
+			"version":   version,
+			"status":    status,
+			"rdb_path":  rdbPath,
+			"databases": dbCount,
 		},
 	}
 }
@@ -444,6 +487,40 @@ func ParseCrontab(crontabOutput string) []string {
 		entries = []string{}
 	}
 	return entries
+}
+
+// ParseRedisVersion extracts the version from `redis-server --version` output.
+// e.g. "Redis server v=7.0.11 sha=00000000:0 malloc=jemalloc-5.2.1 bits=64"
+func ParseRedisVersion(output string) string {
+	for _, field := range strings.Fields(output) {
+		if strings.HasPrefix(field, "v=") {
+			return strings.TrimPrefix(field, "v=")
+		}
+	}
+	return strings.TrimSpace(output)
+}
+
+// ParseRedisConfigValue extracts the value from `redis-cli CONFIG GET key` output.
+// Output format is two lines: the key name, then the value.
+func ParseRedisConfigValue(output string) string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) >= 2 {
+		return strings.TrimSpace(lines[1])
+	}
+	return ""
+}
+
+// ParseRedisDBCount counts how many databases have keys from `redis-cli INFO keyspace`.
+// Lines like "db0:keys=42,expires=0,avg_ttl=0"
+func ParseRedisDBCount(output string) int {
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "db") && strings.Contains(line, "keys=") {
+			count++
+		}
+	}
+	return count
 }
 
 // ParseUFWStatus parses the text output of `ufw status`.

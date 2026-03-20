@@ -89,6 +89,12 @@ func (s *HealthService) CheckServer(ctx context.Context, conn connector.Connecto
 				})
 			}
 
+			// Redis.
+			if result, err := conn.RunCommand(ctx, "redis-cli ping 2>/dev/null"); err == nil {
+				health.Checks = append(health.Checks, ParseRedisStatus(result.Stdout, result.ExitCode))
+			}
+			// Note: no warning if redis-cli not found — Redis is optional.
+
 			// PM2.
 			if result, err := conn.RunCommand(ctx, "pm2 jlist 2>/dev/null"); err == nil {
 				health.Checks = append(health.Checks, ParsePM2Status(result.Stdout))

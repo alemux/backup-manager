@@ -162,6 +162,26 @@ func ParseMySQLStatus(output string, exitCode int) CheckResult {
 	}
 }
 
+// ParseRedisStatus checks the output of "redis-cli ping".
+// Expected output: "PONG" when Redis is running.
+func ParseRedisStatus(output string, exitCode int) CheckResult {
+	trimmed := strings.TrimSpace(output)
+	if exitCode == 0 && strings.Contains(trimmed, "PONG") {
+		return CheckResult{
+			CheckType: "redis",
+			Status:    "ok",
+			Message:   "Redis is running",
+			Value:     "PONG",
+		}
+	}
+	return CheckResult{
+		CheckType: "redis",
+		Status:    "critical",
+		Message:   "Redis is not responding",
+		Value:     trimmed,
+	}
+}
+
 // pm2Process represents a process entry from pm2 jlist JSON output.
 type pm2Process struct {
 	Name   string `json:"name"`

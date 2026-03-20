@@ -11,7 +11,7 @@ function getCSRFToken(): string {
 // State-changing methods that require CSRF protection.
 const CSRF_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const method = (options?.method ?? 'GET').toUpperCase();
 
   const headers: Record<string, string> = {
