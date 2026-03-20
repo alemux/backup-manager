@@ -141,7 +141,7 @@ export default function ServerDetailPage() {
   const [rescanChanges, setRescanChanges] = useState<DiscoveryChange[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAddSource, setShowAddSource] = useState(false);
-  const [newSource, setNewSource] = useState({ name: '', type: 'web', source_path: '', db_name: '' });
+  const [newSource, setNewSource] = useState({ name: '', type: 'web', source_path: '', db_name: '', exclude_patterns: '' });
   const [addingSource, setAddingSource] = useState(false);
   const [addSourceError, setAddSourceError] = useState<string | null>(null);
 
@@ -149,7 +149,7 @@ export default function ServerDetailPage() {
     setAddingSource(true);
     setAddSourceError(null);
     try {
-      const payload: Record<string, string> = { name: newSource.name, type: newSource.type };
+      const payload: Record<string, string> = { name: newSource.name, type: newSource.type, exclude_patterns: newSource.exclude_patterns };
       if (newSource.type === 'database') {
         payload.db_name = newSource.db_name;
       } else {
@@ -158,7 +158,7 @@ export default function ServerDetailPage() {
       await serversApi.createSource(serverId, payload);
       queryClient.invalidateQueries({ queryKey: ['server-sources', serverId] });
       setShowAddSource(false);
-      setNewSource({ name: '', type: 'web', source_path: '', db_name: '' });
+      setNewSource({ name: '', type: 'web', source_path: '', db_name: '', exclude_patterns: '' });
     } catch (e) {
       setAddSourceError(e instanceof Error ? e.message : 'Failed to add source');
     } finally {
@@ -313,6 +313,11 @@ export default function ServerDetailPage() {
                   {src.db_name && (
                     <p className="text-xs text-gray-400 font-mono">{src.db_name}</p>
                   )}
+                  {src.exclude_patterns && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Excludes: <span className="font-mono">{src.exclude_patterns}</span>
+                    </p>
+                  )}
                 </div>
                 <span
                   className={`text-xs px-2 py-0.5 rounded-full font-medium ${
@@ -376,6 +381,17 @@ export default function ServerDetailPage() {
                   />
                 </div>
               )}
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Exclude Patterns</label>
+                <input
+                  type="text"
+                  value={newSource.exclude_patterns}
+                  onChange={(e) => setNewSource((s) => ({ ...s, exclude_patterns: e.target.value }))}
+                  placeholder="node_modules, .git, *.log"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">Comma-separated patterns to exclude from this source backup.</p>
+              </div>
             </div>
             {addSourceError && <p className="text-sm text-red-600 mt-2">{addSourceError}</p>}
             <div className="flex items-center gap-2 mt-3">

@@ -13,27 +13,29 @@ import (
 
 // BackupSource represents a backup source record returned in API responses.
 type BackupSource struct {
-	ID         int        `json:"id"`
-	ServerID   int        `json:"server_id"`
-	Name       string     `json:"name"`
-	Type       string     `json:"type"`
-	SourcePath *string    `json:"source_path"`
-	DBName     *string    `json:"db_name"`
-	DependsOn  *int       `json:"depends_on"`
-	Priority   int        `json:"priority"`
-	Enabled    bool       `json:"enabled"`
-	CreatedAt  time.Time  `json:"created_at"`
+	ID              int        `json:"id"`
+	ServerID        int        `json:"server_id"`
+	Name            string     `json:"name"`
+	Type            string     `json:"type"`
+	SourcePath      *string    `json:"source_path"`
+	DBName          *string    `json:"db_name"`
+	DependsOn       *int       `json:"depends_on"`
+	Priority        int        `json:"priority"`
+	Enabled         bool       `json:"enabled"`
+	ExcludePatterns string     `json:"exclude_patterns"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // sourceRequest is the incoming payload for create/update.
 type sourceRequest struct {
-	Name       string  `json:"name"`
-	Type       string  `json:"type"`
-	SourcePath string  `json:"source_path"`
-	DBName     string  `json:"db_name"`
-	DependsOn  *int    `json:"depends_on"`
-	Priority   int     `json:"priority"`
-	Enabled    *bool   `json:"enabled"`
+	Name            string  `json:"name"`
+	Type            string  `json:"type"`
+	SourcePath      string  `json:"source_path"`
+	DBName          string  `json:"db_name"`
+	DependsOn       *int    `json:"depends_on"`
+	Priority        int     `json:"priority"`
+	Enabled         *bool   `json:"enabled"`
+	ExcludePatterns string  `json:"exclude_patterns"`
 }
 
 // SourcesHandler handles all backup source routes.
@@ -54,7 +56,7 @@ func (h *SourcesHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.DB().QueryContext(r.Context(),
-		`SELECT id, server_id, name, type, source_path, db_name, depends_on, priority, enabled, created_at
+		`SELECT id, server_id, name, type, source_path, db_name, depends_on, priority, enabled, exclude_patterns, created_at
 		 FROM backup_sources WHERE server_id=? ORDER BY priority ASC, id ASC`, serverID)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "failed to query sources")
@@ -120,11 +122,11 @@ func (h *SourcesHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := h.db.DB().ExecContext(r.Context(),
-		`INSERT INTO backup_sources (server_id, name, type, source_path, db_name, depends_on, priority, enabled, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO backup_sources (server_id, name, type, source_path, db_name, depends_on, priority, enabled, exclude_patterns, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		serverID, req.Name, req.Type,
 		nullableString(req.SourcePath), nullableString(req.DBName),
-		req.DependsOn, req.Priority, enabled, now,
+		req.DependsOn, req.Priority, enabled, req.ExcludePatterns, now,
 	)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "failed to create source")
@@ -185,11 +187,11 @@ func (h *SourcesHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.db.DB().ExecContext(r.Context(),
-		`UPDATE backup_sources SET name=?, type=?, source_path=?, db_name=?, depends_on=?, priority=?, enabled=?
+		`UPDATE backup_sources SET name=?, type=?, source_path=?, db_name=?, depends_on=?, priority=?, enabled=?, exclude_patterns=?
 		 WHERE id=?`,
 		req.Name, req.Type,
 		nullableString(req.SourcePath), nullableString(req.DBName),
-		req.DependsOn, req.Priority, enabled, id,
+		req.DependsOn, req.Priority, enabled, req.ExcludePatterns, id,
 	)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "failed to update source")
@@ -237,7 +239,7 @@ func (h *SourcesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *SourcesHandler) fetchSource(r *http.Request, id int) (BackupSource, bool) {
 	row := h.db.DB().QueryRowContext(r.Context(),
-		`SELECT id, server_id, name, type, source_path, db_name, depends_on, priority, enabled, created_at
+		`SELECT id, server_id, name, type, source_path, db_name, depends_on, priority, enabled, exclude_patterns, created_at
 		 FROM backup_sources WHERE id=?`, id)
 	s, err := scanSourceRow(row)
 	if err == sql.ErrNoRows {
@@ -328,12 +330,13 @@ func scanSourceRow(row rowScanner) (BackupSource, error) {
 	var dbName sql.NullString
 	var dependsOn sql.NullInt64
 	var enabledInt int
+	var excludePatterns sql.NullString
 	var createdAt string
 
 	err := row.Scan(
 		&s.ID, &s.ServerID, &s.Name, &s.Type,
 		&sourcePath, &dbName, &dependsOn,
-		&s.Priority, &enabledInt, &createdAt,
+		&s.Priority, &enabledInt, &excludePatterns, &createdAt,
 	)
 	if err != nil {
 		return BackupSource{}, err
@@ -348,6 +351,9 @@ func scanSourceRow(row rowScanner) (BackupSource, error) {
 	if dependsOn.Valid {
 		v := int(dependsOn.Int64)
 		s.DependsOn = &v
+	}
+	if excludePatterns.Valid {
+		s.ExcludePatterns = excludePatterns.String
 	}
 	s.Enabled = enabledInt != 0
 	s.CreatedAt = parseTime(createdAt)

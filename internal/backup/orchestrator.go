@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/backupmanager/backupmanager/internal/database"
@@ -31,15 +32,16 @@ var defaultExcludes = []string{
 
 // BackupSourceRecord represents a row from the backup_sources table.
 type BackupSourceRecord struct {
-	ID         int
-	ServerID   int
-	Name       string
-	Type       string // "web", "database", "config"
-	SourcePath string
-	DBName     string
-	DependsOn  *int // nullable FK to another backup_sources.id
-	Priority   int
-	Enabled    bool
+	ID              int
+	ServerID        int
+	Name            string
+	Type            string // "web", "database", "config"
+	SourcePath      string
+	DBName          string
+	DependsOn       *int // nullable FK to another backup_sources.id
+	Priority        int
+	Enabled         bool
+	ExcludePatterns string // comma-separated exclude patterns
 }
 
 // RunResult holds the outcome of a complete backup job execution.
@@ -270,6 +272,9 @@ func (o *Orchestrator) executeSource(ctx context.Context, src BackupSourceRecord
 
 	destPath := o.buildDestPath(server.Name, src.Type, src.Name, timestamp)
 
+	// Build exclude list: defaults + global setting + per-source patterns
+	excludes := o.buildExcludes(src.ExcludePatterns)
+
 	switch src.Type {
 	case "web", "config":
 		syncer := o.chooseSyncer(server.Type)
@@ -282,7 +287,7 @@ func (o *Orchestrator) executeSource(ctx context.Context, src BackupSourceRecord
 			RemotePath: src.SourcePath,
 		}
 		opts := sync.SyncOptions{
-			Exclude: defaultExcludes,
+			Exclude: excludes,
 		}
 		if job.BandwidthLimit != nil {
 			opts.BandwidthLimitKBps = *job.BandwidthLimit * 1024 // convert Mbps to KBps
@@ -382,7 +387,7 @@ func (o *Orchestrator) loadServer(serverID int) (serverRecord, error) {
 
 func (o *Orchestrator) loadJobSources(jobID int) ([]BackupSourceRecord, error) {
 	rows, err := o.db.DB().Query(
-		`SELECT bs.id, bs.server_id, bs.name, bs.type, bs.source_path, bs.db_name, bs.depends_on, bs.priority, bs.enabled
+		`SELECT bs.id, bs.server_id, bs.name, bs.type, bs.source_path, bs.db_name, bs.depends_on, bs.priority, bs.enabled, bs.exclude_patterns
 		 FROM backup_sources bs
 		 INNER JOIN backup_job_sources bjs ON bjs.source_id = bs.id
 		 WHERE bjs.job_id = ? AND bs.enabled = 1
@@ -396,10 +401,10 @@ func (o *Orchestrator) loadJobSources(jobID int) ([]BackupSourceRecord, error) {
 	var sources []BackupSourceRecord
 	for rows.Next() {
 		var s BackupSourceRecord
-		var sourcePath, dbName sql.NullString
+		var sourcePath, dbName, excludePatterns sql.NullString
 		var dependsOn sql.NullInt64
 		var enabled int
-		if err := rows.Scan(&s.ID, &s.ServerID, &s.Name, &s.Type, &sourcePath, &dbName, &dependsOn, &s.Priority, &enabled); err != nil {
+		if err := rows.Scan(&s.ID, &s.ServerID, &s.Name, &s.Type, &sourcePath, &dbName, &dependsOn, &s.Priority, &enabled, &excludePatterns); err != nil {
 			return nil, err
 		}
 		if sourcePath.Valid {
@@ -411,6 +416,9 @@ func (o *Orchestrator) loadJobSources(jobID int) ([]BackupSourceRecord, error) {
 		if dependsOn.Valid {
 			v := int(dependsOn.Int64)
 			s.DependsOn = &v
+		}
+		if excludePatterns.Valid {
+			s.ExcludePatterns = excludePatterns.String
 		}
 		s.Enabled = enabled == 1
 		sources = append(sources, s)
@@ -451,6 +459,55 @@ func (o *Orchestrator) createSnapshot(runID, sourceID int, snapshotPath string, 
 		runID, sourceID, snapshotPath, sizeBytes, checksum,
 	)
 	return err
+}
+
+// buildExcludes merges defaultExcludes, global exclude patterns from settings,
+// and the per-source exclude_patterns into a single deduplicated slice.
+func (o *Orchestrator) buildExcludes(perSourcePatterns string) []string {
+	seen := make(map[string]bool)
+	var result []string
+
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p != "" && !seen[p] {
+			seen[p] = true
+			result = append(result, p)
+		}
+	}
+
+	for _, p := range defaultExcludes {
+		add(p)
+	}
+
+	// Load global exclude patterns from settings table.
+	globalPatterns := o.loadGlobalExcludePatterns()
+	for _, p := range strings.Split(globalPatterns, ",") {
+		add(strings.TrimSpace(p))
+	}
+	// Also handle newline-separated patterns.
+	for _, p := range strings.Split(globalPatterns, "\n") {
+		add(strings.TrimSpace(p))
+	}
+
+	// Per-source patterns (comma-separated).
+	for _, p := range strings.Split(perSourcePatterns, ",") {
+		add(strings.TrimSpace(p))
+	}
+
+	return result
+}
+
+// loadGlobalExcludePatterns reads the global_exclude_patterns setting from the DB.
+// Returns empty string if not set or on error.
+func (o *Orchestrator) loadGlobalExcludePatterns() string {
+	var val string
+	err := o.db.DB().QueryRow(
+		`SELECT value FROM settings WHERE key = 'global_exclude_patterns'`,
+	).Scan(&val)
+	if err != nil {
+		return ""
+	}
+	return val
 }
 
 // TopologicalSort sorts backup sources respecting depends_on relationships.

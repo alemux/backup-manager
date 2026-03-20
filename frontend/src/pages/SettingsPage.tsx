@@ -866,6 +866,7 @@ function GeneralTab() {
   const [aiProvider, setAiProvider] = useState('');
   const [aiKey, setAiKey] = useState('');
   const [aiModel, setAiModel] = useState('');
+  const [globalExcludePatterns, setGlobalExcludePatterns] = useState('');
   const [initialized, setInitialized] = useState(false);
 
   // Initialize local state once settings load
@@ -878,6 +879,7 @@ function GeneralTab() {
     setAiProvider(settings['ai_provider'] || 'OpenAI');
     setAiKey(settings['ai_api_key'] || '');
     setAiModel(settings['ai_model'] || '');
+    setGlobalExcludePatterns(settings['global_exclude_patterns'] || '');
     setInitialized(true);
   }
 
@@ -892,6 +894,7 @@ function GeneralTab() {
         ai_provider: aiProvider,
         ai_api_key: aiKey,
         ai_model: aiModel,
+        global_exclude_patterns: globalExcludePatterns,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
   });
@@ -970,6 +973,22 @@ function GeneralTab() {
             placeholder="sk-..."
             className="sm:col-span-2"
           />
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Global Exclude Patterns">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Exclude Patterns</label>
+          <textarea
+            value={globalExcludePatterns}
+            onChange={(e) => setGlobalExcludePatterns(e.target.value)}
+            placeholder="node_modules&#10;.git&#10;*.log"
+            rows={5}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            These patterns are excluded from all backup sources (one per line or comma-separated). Per-source patterns are applied in addition to these.
+          </p>
         </div>
       </SectionCard>
 

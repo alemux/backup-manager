@@ -28,6 +28,7 @@ export interface BackupSource {
   depends_on?: number;
   priority: number;
   enabled: boolean;
+  exclude_patterns?: string;
   created_at: string;
 }
 
