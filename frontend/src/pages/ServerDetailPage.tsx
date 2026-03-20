@@ -140,6 +140,31 @@ export default function ServerDetailPage() {
 
   const [rescanChanges, setRescanChanges] = useState<DiscoveryChange[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showAddSource, setShowAddSource] = useState(false);
+  const [newSource, setNewSource] = useState({ name: '', type: 'web', source_path: '', db_name: '' });
+  const [addingSource, setAddingSource] = useState(false);
+  const [addSourceError, setAddSourceError] = useState<string | null>(null);
+
+  const handleAddSource = async () => {
+    setAddingSource(true);
+    setAddSourceError(null);
+    try {
+      const payload: Record<string, string> = { name: newSource.name, type: newSource.type };
+      if (newSource.type === 'database') {
+        payload.db_name = newSource.db_name;
+      } else {
+        payload.source_path = newSource.source_path;
+      }
+      await serversApi.createSource(serverId, payload);
+      queryClient.invalidateQueries({ queryKey: ['server-sources', serverId] });
+      setShowAddSource(false);
+      setNewSource({ name: '', type: 'web', source_path: '', db_name: '' });
+    } catch (e) {
+      setAddSourceError(e instanceof Error ? e.message : 'Failed to add source');
+    } finally {
+      setAddingSource(false);
+    }
+  };
 
   const { data: server, isLoading: serverLoading, isError: serverError } = useQuery<ServerType>({
     queryKey: ['server', serverId],
@@ -260,13 +285,21 @@ export default function ServerDetailPage() {
 
       {/* Backup Sources */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 mb-5">
-        <h2 className="text-base font-bold text-gray-800 mb-4">Backup Sources</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-bold text-gray-800">Backup Sources</h2>
+          <button
+            onClick={() => setShowAddSource(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Plus size={13} /> Add Source
+          </button>
+        </div>
         {sourcesLoading ? (
           <div className="flex items-center gap-2 text-gray-400 text-sm">
             <Loader2 size={15} className="animate-spin" /> Loading sources...
           </div>
         ) : !sources || sources.length === 0 ? (
-          <p className="text-sm text-gray-400">No backup sources configured.</p>
+          <p className="text-sm text-gray-400">No backup sources configured. Add your first source to start backing up.</p>
         ) : (
           <div className="divide-y divide-gray-100">
             {sources.map((src) => (
@@ -290,6 +323,76 @@ export default function ServerDetailPage() {
                 </span>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Add Source Form */}
+        {showAddSource && (
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Add Backup Source</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                <input
+                  type="text"
+                  value={newSource.name}
+                  onChange={(e) => setNewSource((s) => ({ ...s, name: e.target.value }))}
+                  placeholder="My Project"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
+                <select
+                  value={newSource.type}
+                  onChange={(e) => setNewSource((s) => ({ ...s, type: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="web">Web Files</option>
+                  <option value="database">Database</option>
+                  <option value="config">Configuration</option>
+                </select>
+              </div>
+              {newSource.type !== 'database' ? (
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Path</label>
+                  <input
+                    type="text"
+                    value={newSource.source_path}
+                    onChange={(e) => setNewSource((s) => ({ ...s, source_path: e.target.value }))}
+                    placeholder="/var/www/myproject"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              ) : (
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Database Name</label>
+                  <input
+                    type="text"
+                    value={newSource.db_name}
+                    onChange={(e) => setNewSource((s) => ({ ...s, db_name: e.target.value }))}
+                    placeholder="my_database"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
+            </div>
+            {addSourceError && <p className="text-sm text-red-600 mt-2">{addSourceError}</p>}
+            <div className="flex items-center gap-2 mt-3">
+              <button
+                onClick={handleAddSource}
+                disabled={addingSource}
+                className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {addingSource ? 'Adding...' : 'Add'}
+              </button>
+              <button
+                onClick={() => { setShowAddSource(false); setAddSourceError(null); }}
+                className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         )}
       </div>
