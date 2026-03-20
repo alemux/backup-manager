@@ -420,9 +420,19 @@ func run(ctx context.Context, conn connector.Connector, cmd string) (string, boo
 	return strings.TrimSpace(res.Stdout), true
 }
 
+// runLogin executes a command inside a login shell (bash -l -c) so that the
+// user's full PATH is available. Falls back to a plain run if bash -l fails.
+func runLogin(ctx context.Context, conn connector.Connector, cmd string) (string, bool) {
+	if out, ok := run(ctx, conn, "bash -l -c '"+cmd+"' 2>/dev/null"); ok {
+		return out, true
+	}
+	return run(ctx, conn, cmd)
+}
+
 // exists checks whether `which <name>` succeeds (binary is in PATH).
+// Uses a login shell so globally installed npm packages are found.
 func exists(ctx context.Context, conn connector.Connector, name string) bool {
-	_, ok := run(ctx, conn, "which "+name)
+	_, ok := runLogin(ctx, conn, "which "+name)
 	return ok
 }
 
@@ -527,13 +537,12 @@ func detectRedis(ctx context.Context, conn connector.Connector) *DiscoveredServi
 }
 
 func detectPM2(ctx context.Context, conn connector.Connector) *DiscoveredService {
-	// pm2 may be installed as a global npm package, not always in a standard PATH.
-	out, ok := run(ctx, conn, "which pm2 || command -v pm2")
-	if !ok || out == "" {
+	if !exists(ctx, conn, "pm2") {
 		return nil
 	}
 
-	jsonOut, _ := run(ctx, conn, "pm2 jlist")
+	// Run pm2 jlist with login shell to ensure proper environment (PM2 needs node in PATH)
+	jsonOut, _ := runLogin(ctx, conn, "pm2 jlist")
 	procs := ParsePM2Processes(jsonOut)
 
 	return &DiscoveredService{
