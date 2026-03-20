@@ -1,42 +1,4 @@
-const BASE = '';
-
-function getCSRFToken(): string {
-  const match = document.cookie
-    .split('; ')
-    .find((row) => row.startsWith('csrf_token='));
-  return match ? match.split('=')[1] : '';
-}
-
-const CSRF_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
-
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const method = (options?.method ?? 'GET').toUpperCase();
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options?.headers as Record<string, string>),
-  };
-
-  if (CSRF_METHODS.has(method)) {
-    const csrfToken = getCSRFToken();
-    if (csrfToken) {
-      headers['X-CSRF-Token'] = csrfToken;
-    }
-  }
-
-  const res = await fetch(`${BASE}${path}`, {
-    credentials: 'include',
-    ...options,
-    headers,
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json();
-}
+import { request } from './client';
 
 export interface Destination {
   id: number;

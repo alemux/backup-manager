@@ -1,19 +1,4 @@
-const BASE = '';
-const headers = { 'Content-Type': 'application/json' };
-
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    credentials: 'include',
-    headers,
-    ...options,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json();
-}
+import { request } from './client';
 
 export interface Job {
   id: number;
