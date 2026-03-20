@@ -64,7 +64,9 @@ function ChangeBadge({ type }: { type: string }) {
   return <span className="text-xs font-semibold text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded-full">changed</span>;
 }
 
-function ChangesList({ changes }: { changes: DiscoveryChange[] }) {
+function ChangesList({ changes, serverId, onSourceAdded }: { changes: DiscoveryChange[]; serverId: number; onSourceAdded: () => void }) {
+  const [adding, setAdding] = useState<string | null>(null);
+
   if (changes.length === 0) {
     return (
       <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700 flex items-center gap-2">
@@ -72,6 +74,29 @@ function ChangesList({ changes }: { changes: DiscoveryChange[] }) {
       </div>
     );
   }
+
+  const addAsSource = async (change: DiscoveryChange) => {
+    setAdding(change.name);
+    try {
+      let sourceData: Record<string, string>;
+      if (change.category === 'database') {
+        sourceData = { name: change.name, type: 'database', db_name: change.name };
+      } else if (change.category === 'vhost') {
+        sourceData = { name: change.name, type: 'web', source_path: `/var/www/${change.name}` };
+      } else if (change.category === 'process') {
+        sourceData = { name: `${change.name} (PM2)`, type: 'config', source_path: `/home/${change.name}` };
+      } else {
+        sourceData = { name: change.name, type: 'config', source_path: `/etc/${change.name}` };
+      }
+      await serversApi.createSource(serverId, sourceData);
+      onSourceAdded();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to add source');
+    } finally {
+      setAdding(null);
+    }
+  };
+
   return (
     <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
       <p className="text-sm font-semibold text-amber-800 mb-3">
@@ -79,22 +104,30 @@ function ChangesList({ changes }: { changes: DiscoveryChange[] }) {
       </p>
       <div className="space-y-2">
         {changes.map((c, i) => (
-          <div key={i} className="flex items-start gap-3 text-sm">
+          <div key={i} className="flex items-center gap-3 text-sm">
             <ChangeBadge type={c.type} />
-            <div>
+            <div className="flex-1">
               <span className="font-medium text-gray-800">{c.name}</span>
               <span className="text-gray-500 ml-1.5 text-xs">({c.category})</span>
               <p className="text-xs text-gray-500 mt-0.5">{c.details}</p>
             </div>
+            {c.type === 'added' && (
+              <button
+                onClick={() => addAsSource(c)}
+                disabled={adding === c.name}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+              >
+                {adding === c.name ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : (
+                  <Plus size={11} />
+                )}
+                Add as source
+              </button>
+            )}
           </div>
         ))}
       </div>
-      {changes.some((c) => c.type === 'added') && (
-        <div className="mt-3 pt-3 border-t border-amber-200 flex items-center gap-2 text-xs text-amber-700">
-          <Plus size={12} />
-          New items discovered — consider adding them as backup sources.
-        </div>
-      )}
     </div>
   );
 }
@@ -295,7 +328,7 @@ export default function ServerDetailPage() {
           )}
 
           {/* Show change results after a rescan */}
-          {rescanChanges !== null && <ChangesList changes={rescanChanges} />}
+          {rescanChanges !== null && <ChangesList changes={rescanChanges} serverId={serverId} onSourceAdded={() => queryClient.invalidateQueries({ queryKey: ['server-sources', serverId] })} />}
 
           {/* Loading state */}
           {(prevDiscoveryLoading || rescanMutation.isPending) && (
