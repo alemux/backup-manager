@@ -21,6 +21,7 @@ import (
 	"github.com/backupmanager/backupmanager/internal/backup"
 	"github.com/backupmanager/backupmanager/internal/config"
 	"github.com/backupmanager/backupmanager/internal/database"
+	"github.com/backupmanager/backupmanager/internal/discovery"
 	"github.com/backupmanager/backupmanager/internal/setup"
 	ws "github.com/backupmanager/backupmanager/internal/websocket"
 )
@@ -103,6 +104,10 @@ func main() {
 	hub := ws.NewHub(authSvc)
 	go hub.Run()
 
+	// 7a. Start auto-scanner (24h interval)
+	autoScanner := discovery.NewAutoScanner(db, authSvc.CredentialKey(), 0)
+	autoScanner.Start()
+
 	// 8. Create API router with WebSocket support
 	apiRouter := api.NewRouterWithWebSocket(db, authSvc, nil, hub)
 
@@ -157,6 +162,7 @@ func main() {
 
 	<-quit
 	log.Println("Shutting down server...")
+	autoScanner.Stop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

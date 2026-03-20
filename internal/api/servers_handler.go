@@ -14,6 +14,7 @@ import (
 	"github.com/backupmanager/backupmanager/internal/connector"
 	"github.com/backupmanager/backupmanager/internal/database"
 	"github.com/backupmanager/backupmanager/internal/discovery"
+	"github.com/backupmanager/backupmanager/internal/notification"
 )
 
 // Server represents a server record returned in API responses.
@@ -45,8 +46,9 @@ type serverRequest struct {
 
 // ServersHandler handles all /api/servers routes.
 type ServersHandler struct {
-	db      *database.Database
-	credMgr *database.CredentialManager
+	db        *database.Database
+	credMgr   *database.CredentialManager
+	notifyMgr *notification.Manager
 }
 
 // NewServersHandler constructs a ServersHandler without credential encryption.
@@ -62,6 +64,11 @@ func NewServersHandlerWithKey(db *database.Database, credKey []byte) *ServersHan
 		db:      db,
 		credMgr: database.NewCredentialManager(credKey),
 	}
+}
+
+// SetNotifyManager attaches a notification manager used by the Rescan endpoint.
+func (h *ServersHandler) SetNotifyManager(mgr *notification.Manager) {
+	h.notifyMgr = mgr
 }
 
 // List handles GET /api/servers
@@ -459,6 +466,146 @@ func (h *ServersHandler) Discover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSON(w, http.StatusOK, result)
+}
+
+// GetDiscovery handles GET /api/servers/{id}/discovery
+// Returns the last saved discovery results for the server without running a new scan.
+func (h *ServersHandler) GetDiscovery(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	// Verify the server exists.
+	var exists int
+	if err := h.db.DB().QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM servers WHERE id=?", id,
+	).Scan(&exists); err != nil || exists == 0 {
+		Error(w, http.StatusNotFound, "server not found")
+		return
+	}
+
+	discSvc := discovery.NewDiscoveryService(h.db)
+	result, err := discSvc.LoadResults(id)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to load discovery results: %v", err))
+		return
+	}
+
+	JSON(w, http.StatusOK, result)
+}
+
+// Rescan handles POST /api/servers/{id}/rescan
+// Loads previous results, runs a fresh scan, compares, saves, and returns changes.
+func (h *ServersHandler) Rescan(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	// Fetch server credentials.
+	type serverRow struct {
+		name           string
+		host           string
+		port           int
+		connectionType string
+		username       string
+		password       sql.NullString
+		sshKeyPath     sql.NullString
+	}
+	var row serverRow
+	err := h.db.DB().QueryRowContext(r.Context(),
+		`SELECT name, host, port, connection_type, COALESCE(username,''), encrypted_password, ssh_key_path
+		 FROM servers WHERE id=?`, id,
+	).Scan(&row.name, &row.host, &row.port, &row.connectionType, &row.username, &row.password, &row.sshKeyPath)
+	if err == sql.ErrNoRows {
+		Error(w, http.StatusNotFound, "server not found")
+		return
+	}
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "failed to query server")
+		return
+	}
+
+	if row.connectionType != "ssh" {
+		Error(w, http.StatusBadRequest, "rescan is only supported for SSH servers")
+		return
+	}
+
+	sshCfg := connector.SSHConfig{
+		Host:     row.host,
+		Port:     row.port,
+		Username: row.username,
+		Timeout:  30 * time.Second,
+	}
+	if row.password.Valid {
+		decPassword, err := h.decryptCred(row.password.String)
+		if err != nil {
+			Error(w, http.StatusInternalServerError, "failed to decrypt server password")
+			return
+		}
+		sshCfg.Password = decPassword
+	}
+	if row.sshKeyPath.Valid {
+		decSSHKey, err := h.decryptCred(row.sshKeyPath.String)
+		if err != nil {
+			Error(w, http.StatusInternalServerError, "failed to decrypt ssh key")
+			return
+		}
+		sshCfg.KeyPath = decSSHKey
+	}
+
+	discSvc := discovery.NewDiscoveryService(h.db)
+
+	// 1. Load previous results.
+	previous, err := discSvc.LoadResults(id)
+	if err != nil {
+		// Non-fatal: treat as empty previous scan.
+		previous = &discovery.DiscoveryResult{ServerID: id, Services: []discovery.DiscoveredService{}}
+	}
+
+	// 2. Run fresh discovery.
+	conn := connector.NewSSHConnector(sshCfg)
+	if err := conn.Connect(); err != nil {
+		Error(w, http.StatusBadGateway, fmt.Sprintf("SSH connection failed: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	current, err := discSvc.Discover(context.Background(), conn)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, fmt.Sprintf("discovery failed: %v", err))
+		return
+	}
+	current.ServerID = id
+
+	// 3. Compare.
+	changes := discovery.CompareResults(previous.Services, current.Services)
+
+	// 4. Save new results.
+	if err := discSvc.SaveResults(id, current); err != nil {
+		_ = err // Non-fatal: return results anyway.
+	}
+
+	// 5. Notify if changes found.
+	if len(changes) > 0 && h.notifyMgr != nil {
+		details := make(map[string]string, len(changes))
+		for i, c := range changes {
+			details[fmt.Sprintf("change_%d", i+1)] = fmt.Sprintf("[%s] %s/%s: %s", c.Type, c.Category, c.Name, c.Details)
+		}
+		_ = h.notifyMgr.Notify(notification.NotificationEvent{
+			Type:       notification.EventServiceDown, // closest existing type; reuse for discovery changes
+			ServerName: row.name,
+			Title:      fmt.Sprintf("Discovery changes on %s", row.name),
+			Message:    fmt.Sprintf("%d change(s) detected during rescan", len(changes)),
+			Details:    details,
+		})
+	}
+
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"discovery": current,
+		"changes":   changes,
+	})
 }
 
 // encryptCred encrypts plaintext using the handler's CredentialManager.

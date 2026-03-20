@@ -6,14 +6,17 @@ import {
   Loader2,
   AlertCircle,
   Trash2,
-  Search,
+  RefreshCw,
   Database,
   Globe,
   Settings,
   Monitor,
   Server,
+  Clock,
+  Plus,
 } from 'lucide-react';
 import { serversApi } from '../api/servers';
+import type { DiscoveryChange } from '../api/servers';
 import type { Server as ServerType, BackupSource, DiscoveryResult } from '../types';
 
 function StatusBadge({ status }: { status: ServerType['status'] }) {
@@ -55,13 +58,54 @@ function SourceTypeBadge({ type }: { type: BackupSource['type'] }) {
   );
 }
 
+function ChangeBadge({ type }: { type: string }) {
+  if (type === 'added') return <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">added</span>;
+  if (type === 'removed') return <span className="text-xs font-semibold text-red-700 bg-red-100 px-2 py-0.5 rounded-full">removed</span>;
+  return <span className="text-xs font-semibold text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded-full">changed</span>;
+}
+
+function ChangesList({ changes }: { changes: DiscoveryChange[] }) {
+  if (changes.length === 0) {
+    return (
+      <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700 flex items-center gap-2">
+        No changes detected since last scan.
+      </div>
+    );
+  }
+  return (
+    <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+      <p className="text-sm font-semibold text-amber-800 mb-3">
+        {changes.length} change{changes.length !== 1 ? 's' : ''} detected since last scan
+      </p>
+      <div className="space-y-2">
+        {changes.map((c, i) => (
+          <div key={i} className="flex items-start gap-3 text-sm">
+            <ChangeBadge type={c.type} />
+            <div>
+              <span className="font-medium text-gray-800">{c.name}</span>
+              <span className="text-gray-500 ml-1.5 text-xs">({c.category})</span>
+              <p className="text-xs text-gray-500 mt-0.5">{c.details}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      {changes.some((c) => c.type === 'added') && (
+        <div className="mt-3 pt-3 border-t border-amber-200 flex items-center gap-2 text-xs text-amber-700">
+          <Plus size={12} />
+          New items discovered — consider adding them as backup sources.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ServerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const serverId = parseInt(id ?? '0');
 
-  const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
+  const [rescanChanges, setRescanChanges] = useState<DiscoveryChange[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const { data: server, isLoading: serverLoading, isError: serverError } = useQuery<ServerType>({
@@ -76,10 +120,24 @@ export default function ServerDetailPage() {
     enabled: !!serverId,
   });
 
-  const discoverMutation = useMutation({
-    mutationFn: () => serversApi.discover(serverId),
+  // Load previous discovery results on page mount (Linux servers only)
+  const { data: prevDiscovery, isLoading: prevDiscoveryLoading } = useQuery<DiscoveryResult>({
+    queryKey: ['server-discovery', serverId],
+    queryFn: () => serversApi.getPreviousDiscovery(serverId),
+    enabled: !!serverId && server?.type === 'linux',
+    retry: false,
+  });
+
+  // Active discovery result: either the latest rescan or the previously saved one
+  const [latestDiscovery, setLatestDiscovery] = useState<DiscoveryResult | null>(null);
+  const discoveryResult: DiscoveryResult | null = latestDiscovery ?? prevDiscovery ?? null;
+
+  const rescanMutation = useMutation({
+    mutationFn: () => serversApi.rescan(serverId),
     onSuccess: (data) => {
-      setDiscoveryResult(data as DiscoveryResult);
+      setLatestDiscovery(data.discovery);
+      setRescanChanges(data.changes);
+      queryClient.invalidateQueries({ queryKey: ['server-discovery', serverId] });
     },
   });
 
@@ -206,48 +264,57 @@ export default function ServerDetailPage() {
       {/* Discovery (Linux only) */}
       {server.type === 'linux' && (
         <div className="bg-white border border-gray-200 rounded-xl p-6 mb-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-1">
             <h2 className="text-base font-bold text-gray-800">Discovered Services</h2>
-            <button
-              onClick={() => discoverMutation.mutate()}
-              disabled={discoverMutation.isPending}
-              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors disabled:opacity-60"
-            >
-              {discoverMutation.isPending ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Search size={13} />
-              )}
-              Run Discovery
-            </button>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-400 flex items-center gap-1">
+                <Clock size={11} /> Auto-scan: every 24h
+              </span>
+              <button
+                onClick={() => { setRescanChanges(null); rescanMutation.mutate(); }}
+                disabled={rescanMutation.isPending}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 transition-colors disabled:opacity-60"
+              >
+                {rescanMutation.isPending ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={13} />
+                )}
+                Rescan
+              </button>
+            </div>
           </div>
 
-          {discoverMutation.isError && (
-            <div className="flex items-center gap-2 text-red-600 text-sm mb-3">
+          {rescanMutation.isError && (
+            <div className="flex items-center gap-2 text-red-600 text-sm mb-3 mt-2">
               <AlertCircle size={14} />
-              {discoverMutation.error instanceof Error
-                ? discoverMutation.error.message
-                : 'Discovery failed'}
+              {rescanMutation.error instanceof Error
+                ? rescanMutation.error.message
+                : 'Rescan failed'}
             </div>
           )}
 
-          {!discoveryResult && !discoverMutation.isPending && (
-            <p className="text-sm text-gray-400">
-              Run discovery to detect installed services (NGINX, MySQL, PM2, etc.)
-            </p>
-          )}
+          {/* Show change results after a rescan */}
+          {rescanChanges !== null && <ChangesList changes={rescanChanges} />}
 
-          {discoverMutation.isPending && (
-            <div className="flex items-center gap-3 py-4">
+          {/* Loading state */}
+          {(prevDiscoveryLoading || rescanMutation.isPending) && (
+            <div className="flex items-center gap-3 py-4 mt-2">
               <Loader2 size={18} className="animate-spin text-blue-600" />
-              <span className="text-gray-500 text-sm">Scanning server for services...</span>
+              <span className="text-gray-500 text-sm">
+                {rescanMutation.isPending ? 'Scanning server for services...' : 'Loading last scan results...'}
+              </span>
             </div>
           )}
 
-          {discoveryResult && (
-            <div>
-              <p className="text-xs text-gray-400 mb-3">
-                Scanned: {new Date(discoveryResult.scanned_at).toLocaleString()}
+          {/* Last scan results */}
+          {!prevDiscoveryLoading && !rescanMutation.isPending && discoveryResult && (
+            <div className="mt-4">
+              <p className="text-xs text-gray-400 mb-3 flex items-center gap-1">
+                <Clock size={11} />
+                Last scan: {discoveryResult.scanned_at
+                  ? new Date(discoveryResult.scanned_at).toLocaleString()
+                  : 'unknown'}
               </p>
               {discoveryResult.services.length === 0 ? (
                 <p className="text-sm text-gray-400">No services detected.</p>
@@ -268,6 +335,12 @@ export default function ServerDetailPage() {
                 </div>
               )}
             </div>
+          )}
+
+          {!prevDiscoveryLoading && !rescanMutation.isPending && !discoveryResult && (
+            <p className="text-sm text-gray-400 mt-3">
+              No previous scan results. Click Rescan to detect installed services.
+            </p>
           )}
         </div>
       )}

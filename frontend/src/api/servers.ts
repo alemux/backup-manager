@@ -1,5 +1,17 @@
 import { request } from './client';
-import type { Server, BackupSource } from '../types';
+import type { Server, BackupSource, DiscoveryResult } from '../types';
+
+export interface DiscoveryChange {
+  type: string;     // "added" | "removed" | "changed"
+  category: string; // "database" | "vhost" | "service" | "process"
+  name: string;
+  details: string;
+}
+
+export interface RescanResult {
+  discovery: DiscoveryResult;
+  changes: DiscoveryChange[];
+}
 
 export const serversApi = {
   list: () => request<Server[]>('/api/servers'),
@@ -28,6 +40,10 @@ export const serversApi = {
       '/api/servers/discover-preview',
       { method: 'POST', body: JSON.stringify(data) }
     ),
+  rescan: (id: number) =>
+    request<RescanResult>(`/api/servers/${id}/rescan`, { method: 'POST' }),
+  getPreviousDiscovery: (id: number) =>
+    request<DiscoveryResult>(`/api/servers/${id}/discovery`),
   listSources: (serverId: number) =>
     request<BackupSource[]>(`/api/servers/${serverId}/sources`),
   createSource: (serverId: number, data: unknown) =>

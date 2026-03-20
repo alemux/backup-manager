@@ -12,6 +12,286 @@ import (
 	"github.com/backupmanager/backupmanager/internal/database"
 )
 
+// DiscoveryChange describes a single change detected between two scans.
+type DiscoveryChange struct {
+	Type     string `json:"type"`     // "added", "removed", "changed"
+	Category string `json:"category"` // "database", "vhost", "service", "process"
+	Name     string `json:"name"`
+	Details  string `json:"details"`
+}
+
+// CompareResults compares previous and current discovery results.
+// Returns a list of changes (new databases, removed vhosts, new services, etc.)
+func CompareResults(previous, current []DiscoveredService) []DiscoveryChange {
+	var changes []DiscoveryChange
+
+	prevMap := make(map[string]DiscoveredService, len(previous))
+	for _, s := range previous {
+		prevMap[s.Name] = s
+	}
+	currMap := make(map[string]DiscoveredService, len(current))
+	for _, s := range current {
+		currMap[s.Name] = s
+	}
+
+	// Services added
+	for _, s := range current {
+		if _, found := prevMap[s.Name]; !found {
+			changes = append(changes, DiscoveryChange{
+				Type:     "added",
+				Category: "service",
+				Name:     s.Name,
+				Details:  "new service detected",
+			})
+		}
+	}
+
+	// Services removed
+	for _, s := range previous {
+		if _, found := currMap[s.Name]; !found {
+			changes = append(changes, DiscoveryChange{
+				Type:     "removed",
+				Category: "service",
+				Name:     s.Name,
+				Details:  "service no longer detected",
+			})
+		}
+	}
+
+	// Compare shared services in detail
+	for _, curr := range current {
+		prev, found := prevMap[curr.Name]
+		if !found {
+			continue
+		}
+		switch curr.Name {
+		case "nginx":
+			changes = append(changes, compareNginxVhosts(prev.Data, curr.Data)...)
+		case "mysql":
+			changes = append(changes, compareMySQLDatabases(prev.Data, curr.Data)...)
+		case "redis":
+			changes = append(changes, compareRedis(prev.Data, curr.Data)...)
+		case "pm2":
+			changes = append(changes, comparePM2Processes(prev.Data, curr.Data)...)
+		}
+	}
+
+	if changes == nil {
+		return []DiscoveryChange{}
+	}
+	return changes
+}
+
+// compareNginxVhosts detects added/removed vhosts between two nginx data maps.
+func compareNginxVhosts(prev, curr map[string]interface{}) []DiscoveryChange {
+	var changes []DiscoveryChange
+
+	prevVhosts := extractVhostNames(prev)
+	currVhosts := extractVhostNames(curr)
+
+	prevSet := toSet(prevVhosts)
+	currSet := toSet(currVhosts)
+
+	for name := range currSet {
+		if !prevSet[name] {
+			changes = append(changes, DiscoveryChange{
+				Type:     "added",
+				Category: "vhost",
+				Name:     name,
+				Details:  "new nginx vhost detected",
+			})
+		}
+	}
+	for name := range prevSet {
+		if !currSet[name] {
+			changes = append(changes, DiscoveryChange{
+				Type:     "removed",
+				Category: "vhost",
+				Name:     name,
+				Details:  "nginx vhost no longer present",
+			})
+		}
+	}
+	return changes
+}
+
+// compareMySQLDatabases detects added/removed databases between two mysql data maps.
+func compareMySQLDatabases(prev, curr map[string]interface{}) []DiscoveryChange {
+	var changes []DiscoveryChange
+
+	prevDBs := extractStringList(prev, "databases")
+	currDBs := extractStringList(curr, "databases")
+
+	prevSet := toSet(prevDBs)
+	currSet := toSet(currDBs)
+
+	for name := range currSet {
+		if !prevSet[name] {
+			changes = append(changes, DiscoveryChange{
+				Type:     "added",
+				Category: "database",
+				Name:     name,
+				Details:  "new MySQL database detected",
+			})
+		}
+	}
+	for name := range prevSet {
+		if !currSet[name] {
+			changes = append(changes, DiscoveryChange{
+				Type:     "removed",
+				Category: "database",
+				Name:     name,
+				Details:  "MySQL database no longer present",
+			})
+		}
+	}
+	return changes
+}
+
+// compareRedis detects database count changes in redis.
+func compareRedis(prev, curr map[string]interface{}) []DiscoveryChange {
+	var changes []DiscoveryChange
+
+	prevCount := toInt(prev["databases"])
+	currCount := toInt(curr["databases"])
+
+	if prevCount != currCount {
+		changes = append(changes, DiscoveryChange{
+			Type:     "changed",
+			Category: "database",
+			Name:     "redis",
+			Details:  fmt.Sprintf("database count changed from %d to %d", prevCount, currCount),
+		})
+	}
+	return changes
+}
+
+// comparePM2Processes detects added/removed/changed PM2 processes.
+func comparePM2Processes(prev, curr map[string]interface{}) []DiscoveryChange {
+	var changes []DiscoveryChange
+
+	prevProcs := extractProcessMap(prev)
+	currProcs := extractProcessMap(curr)
+
+	for name, currStatus := range currProcs {
+		if prevStatus, found := prevProcs[name]; !found {
+			changes = append(changes, DiscoveryChange{
+				Type:     "added",
+				Category: "process",
+				Name:     name,
+				Details:  "new PM2 process detected",
+			})
+		} else if prevStatus != currStatus {
+			changes = append(changes, DiscoveryChange{
+				Type:     "changed",
+				Category: "process",
+				Name:     name,
+				Details:  fmt.Sprintf("PM2 process status changed from %q to %q", prevStatus, currStatus),
+			})
+		}
+	}
+	for name := range prevProcs {
+		if _, found := currProcs[name]; !found {
+			changes = append(changes, DiscoveryChange{
+				Type:     "removed",
+				Category: "process",
+				Name:     name,
+				Details:  "PM2 process no longer running",
+			})
+		}
+	}
+	return changes
+}
+
+// ── compare helpers ───────────────────────────────────────────────────────────
+
+func extractVhostNames(data map[string]interface{}) []string {
+	raw, ok := data["vhosts"]
+	if !ok {
+		return nil
+	}
+	var names []string
+	switch v := raw.(type) {
+	case []interface{}:
+		for _, item := range v {
+			switch m := item.(type) {
+			case map[string]interface{}:
+				if n, ok := m["name"].(string); ok && n != "" {
+					names = append(names, n)
+				}
+			case map[string]string:
+				if n, ok := m["name"]; ok && n != "" {
+					names = append(names, n)
+				}
+			}
+		}
+	}
+	return names
+}
+
+func extractStringList(data map[string]interface{}, key string) []string {
+	raw, ok := data[key]
+	if !ok {
+		return nil
+	}
+	var out []string
+	switch v := raw.(type) {
+	case []string:
+		return v
+	case []interface{}:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+func extractProcessMap(data map[string]interface{}) map[string]string {
+	result := make(map[string]string)
+	raw, ok := data["processes"]
+	if !ok {
+		return result
+	}
+	items, ok := raw.([]interface{})
+	if !ok {
+		return result
+	}
+	for _, item := range items {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := m["name"].(string)
+		status, _ := m["status"].(string)
+		if name != "" {
+			result[name] = status
+		}
+	}
+	return result
+}
+
+func toSet(items []string) map[string]bool {
+	s := make(map[string]bool, len(items))
+	for _, v := range items {
+		s[v] = true
+	}
+	return s
+}
+
+func toInt(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	case int64:
+		return int(n)
+	}
+	return 0
+}
+
 // DiscoveryService detects installed services on a remote Linux server.
 type DiscoveryService struct {
 	db *database.Database
@@ -89,6 +369,45 @@ func (s *DiscoveryService) SaveResults(serverID int, result *DiscoveryResult) er
 		}
 	}
 	return nil
+}
+
+// LoadResults fetches the last saved discovery results for a server from the DB.
+// Returns an empty DiscoveryResult (with no services) if none are saved yet.
+func (s *DiscoveryService) LoadResults(serverID int) (*DiscoveryResult, error) {
+	rows, err := s.db.DB().Query(
+		`SELECT service_name, service_data, discovered_at
+		 FROM discovery_results WHERE server_id = ? ORDER BY id ASC`,
+		serverID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query discovery results: %w", err)
+	}
+	defer rows.Close()
+
+	result := &DiscoveryResult{
+		ServerID: serverID,
+		Services: []DiscoveredService{},
+	}
+
+	for rows.Next() {
+		var name, dataJSON, discoveredAt string
+		if err := rows.Scan(&name, &dataJSON, &discoveredAt); err != nil {
+			return nil, fmt.Errorf("scan discovery result: %w", err)
+		}
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(dataJSON), &data); err != nil {
+			data = map[string]interface{}{}
+		}
+		result.Services = append(result.Services, DiscoveredService{Name: name, Data: data})
+		// Use the timestamp from the last row (they should all be identical within a scan).
+		if t, err := time.Parse(time.RFC3339, discoveredAt); err == nil {
+			result.ScannedAt = t.UTC()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("discovery results iteration: %w", err)
+	}
+	return result, nil
 }
 
 // run executes a command and returns stdout. Returns ("", false) when the
