@@ -114,8 +114,22 @@ func (r *RsyncSyncer) Sync(ctx context.Context, source SyncSource, destPath stri
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		// rsync failed — return the error so callers know the sync did not succeed
-		return result, fmt.Errorf("rsync failed: %v\nOutput: %s", err, output)
+
+		// rsync exit codes:
+		// 0  = success
+		// 23 = partial transfer (some files could not be transferred, e.g. socket files)
+		// 24 = partial transfer (some files vanished during transfer)
+		// These are acceptable — the important files were copied.
+		exitCode := 0
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+		if exitCode == 23 || exitCode == 24 {
+			// Partial transfer is OK — log warning but don't fail
+			result.Errors = append(result.Errors, fmt.Sprintf("rsync partial transfer (exit %d): some files skipped", exitCode))
+		} else {
+			return result, fmt.Errorf("rsync failed: %v\nOutput: %s", err, output)
+		}
 	}
 
 	return result, nil

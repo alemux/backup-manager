@@ -236,7 +236,9 @@ export default function AddServerWizard({ onClose }: WizardProps) {
     // pm2
     const pm2 = getService('pm2');
     if (pm2 && selectedSources['pm2']) {
-      sources.push({ name: 'PM2 Config', type: 'config', source_path: '/etc/pm2' });
+      // PM2 config lives in the user's home directory (~/.pm2)
+      const pm2Home = conn.username === 'root' ? '/root/.pm2' : `/home/${conn.username}/.pm2`;
+      sources.push({ name: 'PM2 Config', type: 'config', source_path: pm2Home });
     }
 
     // redis RDB dump
