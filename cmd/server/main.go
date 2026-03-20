@@ -22,6 +22,7 @@ import (
 	"github.com/backupmanager/backupmanager/internal/config"
 	"github.com/backupmanager/backupmanager/internal/database"
 	"github.com/backupmanager/backupmanager/internal/discovery"
+	"github.com/backupmanager/backupmanager/internal/notification"
 	"github.com/backupmanager/backupmanager/internal/setup"
 	ws "github.com/backupmanager/backupmanager/internal/websocket"
 )
@@ -108,14 +109,45 @@ func main() {
 	autoScanner := discovery.NewAutoScanner(db, authSvc.CredentialKey(), 0)
 	autoScanner.Start()
 
-	// 8. Create backup orchestrator and runner for job triggering
+	// 8. Create notification manager (loads config from settings table)
+	var notifMgr *notification.Manager
+	{
+		var telegramNotifier *notification.TelegramNotifier
+		var emailNotifier *notification.EmailNotifier
+
+		// Load Telegram config from settings
+		var tgToken string
+		if err := db.DB().QueryRow("SELECT value FROM settings WHERE key='telegram_bot_token'").Scan(&tgToken); err == nil && tgToken != "" {
+			telegramNotifier = notification.NewTelegramNotifier(tgToken)
+		}
+
+		// Load SMTP config from settings
+		var smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom string
+		db.DB().QueryRow("SELECT value FROM settings WHERE key='smtp_host'").Scan(&smtpHost)
+		db.DB().QueryRow("SELECT value FROM settings WHERE key='smtp_port'").Scan(&smtpPort)
+		db.DB().QueryRow("SELECT value FROM settings WHERE key='smtp_user'").Scan(&smtpUser)
+		db.DB().QueryRow("SELECT value FROM settings WHERE key='smtp_pass'").Scan(&smtpPass)
+		db.DB().QueryRow("SELECT value FROM settings WHERE key='smtp_from'").Scan(&smtpFrom)
+		if smtpHost != "" {
+			port := 587
+			if smtpPort != "" {
+				fmt.Sscanf(smtpPort, "%d", &port)
+			}
+			emailNotifier = notification.NewEmailNotifier(notification.SMTPConfig{
+				Host: smtpHost, Port: port, Username: smtpUser, Password: smtpPass, From: smtpFrom,
+			})
+		}
+
+		notifMgr = notification.NewManager(db, telegramNotifier, emailNotifier)
+	}
+
+	// 8a. Create backup orchestrator and runner for job triggering
 	orchestrator := backup.NewOrchestrator(db)
 	orchestrator.SetCredentialKey(authSvc.CredentialKey())
 	orchestrator.SetSkipPreflight(false)
 	runner := backup.NewRunner(orchestrator, db)
 
 	triggerFn := func(jobID int) (int, error) {
-		// Create a pending run record and return its ID immediately
 		now := time.Now().UTC().Format(time.RFC3339)
 		result, err := db.DB().Exec(
 			`INSERT INTO backup_runs (job_id, status, started_at, created_at) VALUES (?, 'pending', ?, ?)`,
@@ -127,23 +159,49 @@ func main() {
 		runID64, _ := result.LastInsertId()
 		runID := int(runID64)
 
-		// Run backup in background goroutine
+		// Look up job and server name for notifications
+		var jobName, serverName string
+		db.DB().QueryRow("SELECT bj.name, s.name FROM backup_jobs bj JOIN servers s ON s.id=bj.server_id WHERE bj.id=?", jobID).Scan(&jobName, &serverName)
+
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 			defer cancel()
 			runResult, err := runner.Run(ctx, jobID)
+
+			// Send notification
 			if err != nil {
 				log.Printf("Backup job %d failed: %v", jobID, err)
+				notifMgr.Notify(notification.NotificationEvent{
+					Type:       notification.EventBackupFailed,
+					ServerName: serverName,
+					Title:      "Backup Failed: " + jobName,
+					Message:    err.Error(),
+				})
 			} else {
 				log.Printf("Backup job %d completed: status=%s, size=%d", jobID, runResult.Status, runResult.TotalSize)
+				if runResult.Status == "success" {
+					notifMgr.Notify(notification.NotificationEvent{
+						Type:       notification.EventBackupSuccess,
+						ServerName: serverName,
+						Title:      "Backup OK: " + jobName,
+						Message:    fmt.Sprintf("%d files, %d bytes", runResult.FilesCopied, runResult.TotalSize),
+					})
+				} else {
+					notifMgr.Notify(notification.NotificationEvent{
+						Type:       notification.EventBackupFailed,
+						ServerName: serverName,
+						Title:      "Backup Failed: " + jobName,
+						Message:    fmt.Sprintf("Status: %s, Errors: %v", runResult.Status, runResult.Errors),
+					})
+				}
 			}
 		}()
 
 		return runID, nil
 	}
 
-	// 8a. Create API router with WebSocket support and trigger function
-	apiRouter := api.NewRouterWithWebSocket(db, authSvc, nil, hub, triggerFn)
+	// 8b. Create API router with WebSocket support, notifications, and trigger function
+	apiRouter := api.NewRouterWithWebSocket(db, authSvc, notifMgr, hub, triggerFn)
 
 	// 9. Wrap with RefreshMiddleware
 	apiRouter = authSvc.RefreshMiddleware(apiRouter)
