@@ -23,6 +23,11 @@ export const serversApi = {
     ),
   discover: (id: number) =>
     request<unknown>(`/api/servers/${id}/discover`, { method: 'POST' }),
+  discoverPreview: (data: { host: string; port: number; username: string; password?: string; ssh_key_path?: string }) =>
+    request<{ server_id: number; services: Array<{ name: string; data: Record<string, unknown> }>; scanned_at: string }>(
+      '/api/servers/discover-preview',
+      { method: 'POST', body: JSON.stringify(data) }
+    ),
   listSources: (serverId: number) =>
     request<BackupSource[]>(`/api/servers/${serverId}/sources`),
   createSource: (serverId: number, data: unknown) =>

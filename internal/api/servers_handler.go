@@ -329,6 +329,56 @@ func (h *ServersHandler) TestConnection(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// DiscoverPreview handles POST /api/servers/discover-preview
+// Connects via SSH using provided credentials (no saved server needed) and runs auto-discovery.
+func (h *ServersHandler) DiscoverPreview(w http.ResponseWriter, r *http.Request) {
+	type previewRequest struct {
+		Host       string `json:"host"`
+		Port       int    `json:"port"`
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		SSHKeyPath string `json:"ssh_key_path"`
+	}
+
+	var req previewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		Error(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Host == "" {
+		Error(w, http.StatusBadRequest, "host is required")
+		return
+	}
+
+	port := req.Port
+	if port == 0 {
+		port = 22
+	}
+
+	conn := connector.NewSSHConnector(connector.SSHConfig{
+		Host:     req.Host,
+		Port:     port,
+		Username: req.Username,
+		Password: req.Password,
+		KeyPath:  req.SSHKeyPath,
+		Timeout:  15 * time.Second,
+	})
+	if err := conn.Connect(); err != nil {
+		Error(w, http.StatusBadGateway, fmt.Sprintf("SSH connection failed: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	discSvc := discovery.NewDiscoveryService(h.db)
+	result, err := discSvc.Discover(r.Context(), conn)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, fmt.Sprintf("discovery failed: %v", err))
+		return
+	}
+
+	JSON(w, http.StatusOK, result)
+}
+
 // Discover handles POST /api/servers/{id}/discover
 // It connects to the server via SSH, runs auto-discovery, saves results and
 // returns the DiscoveryResult as JSON.

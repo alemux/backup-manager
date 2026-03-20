@@ -273,20 +273,14 @@ export default function AddServerWizard({ onClose }: WizardProps) {
   const handleRunDiscovery = async () => {
     setDiscoveryLoading(true);
     try {
-      // We need a temp server id — for now we call discover on a dummy flow
-      // In real use: create server first, discover, then allow editing sources
-      // For wizard UX, we'll mock a "pre-save" discover with test connection data
-      const res = (await serversApi.testConnection({
+      const res = await serversApi.discoverPreview({
         host: conn.host,
-        port: parseInt(conn.port),
-        connection_type: 'ssh',
+        port: parseInt(conn.port) || 22,
         username: conn.username,
         password: conn.password,
-        private_key: conn.authMethod === 'key' ? conn.privateKey : undefined,
-        action: 'discover',
-      })) as unknown;
-      // The real discover endpoint needs a server id; we'll skip to next step with empty discovery
-      setDiscovery(res as DiscoveryResult);
+        ssh_key_path: conn.authMethod === 'key' ? conn.privateKey : undefined,
+      });
+      setDiscovery(res);
       // pre-select all
       const sel: Record<string, boolean> = {};
       const dr = res as DiscoveryResult;
@@ -466,7 +460,7 @@ export default function AddServerWizard({ onClose }: WizardProps) {
       )}
       {discovery && !discoveryLoading && (
         <div>
-          {discovery.services.length === 0 ? (
+          {!discovery.services || discovery.services.length === 0 ? (
             <div className="text-gray-500 text-sm py-4">No services detected. You can proceed to configure sources manually.</div>
           ) : (
             <div className="space-y-3">
