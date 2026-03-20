@@ -110,6 +110,7 @@ func main() {
 
 	// 8. Create backup orchestrator and runner for job triggering
 	orchestrator := backup.NewOrchestrator(db)
+	orchestrator.SetCredentialKey(authSvc.CredentialKey())
 	orchestrator.SetSkipPreflight(false)
 	runner := backup.NewRunner(orchestrator, db)
 

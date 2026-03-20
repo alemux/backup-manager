@@ -75,6 +75,7 @@ type Orchestrator struct {
 	mysqlDumper    *MySQLDumpOrchestrator
 	backupDir      string // base directory for backup storage
 	skipPreflight  bool   // if true, skip pre-flight checks (for testing)
+	credKey        []byte // AES key for decrypting server credentials
 }
 
 // NewOrchestrator creates a new Orchestrator with default syncers.
@@ -99,6 +100,9 @@ func (o *Orchestrator) SetMySQLDumper(d *MySQLDumpOrchestrator) { o.mysqlDumper 
 
 // SetBackupDir sets the base backup directory.
 func (o *Orchestrator) SetBackupDir(dir string) { o.backupDir = dir }
+
+// SetCredentialKey sets the AES key used to decrypt server credentials from the DB.
+func (o *Orchestrator) SetCredentialKey(key []byte) { o.credKey = key }
 
 // loadPrimaryDestPath reads the primary destination path from the destinations table.
 // Falls back to the default backupDir if none is configured.
@@ -391,11 +395,27 @@ func (o *Orchestrator) loadServer(serverID int) (serverRecord, error) {
 	if err != nil {
 		return s, err
 	}
-	if pw.Valid {
-		s.Password = pw.String
+	if pw.Valid && pw.String != "" {
+		if o.credKey != nil {
+			decrypted, err := database.DecryptCredential(pw.String, o.credKey)
+			if err != nil {
+				return s, fmt.Errorf("decrypt server password: %w", err)
+			}
+			s.Password = decrypted
+		} else {
+			s.Password = pw.String
+		}
 	}
-	if keyPath.Valid {
-		s.SSHKeyPath = keyPath.String
+	if keyPath.Valid && keyPath.String != "" {
+		if o.credKey != nil {
+			decrypted, err := database.DecryptCredential(keyPath.String, o.credKey)
+			if err != nil {
+				return s, fmt.Errorf("decrypt ssh key: %w", err)
+			}
+			s.SSHKeyPath = decrypted
+		} else {
+			s.SSHKeyPath = keyPath.String
+		}
 	}
 	return s, nil
 }

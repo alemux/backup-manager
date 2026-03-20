@@ -114,7 +114,8 @@ func (r *RsyncSyncer) Sync(ctx context.Context, source SyncSource, destPath stri
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		result.Errors = append(result.Errors, fmt.Sprintf("rsync exited with error: %v", err))
+		// rsync failed — return the error so callers know the sync did not succeed
+		return result, fmt.Errorf("rsync failed: %v\nOutput: %s", err, output)
 	}
 
 	return result, nil
