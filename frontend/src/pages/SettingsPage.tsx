@@ -106,6 +106,12 @@ function NotificationsTab() {
     queryFn: settingsApi.getNotifications,
   });
 
+  // Load saved connection settings from the settings table
+  const { data: settings = {} } = useQuery({
+    queryKey: ['settings'],
+    queryFn: settingsApi.getSettings,
+  });
+
   const [telegramToken, setTelegramToken] = useState('');
   const [telegramChatId, setTelegramChatId] = useState('');
   const [emailHost, setEmailHost] = useState('');
@@ -114,6 +120,19 @@ function NotificationsTab() {
   const [emailPass, setEmailPass] = useState('');
   const [emailFrom, setEmailFrom] = useState('');
   const [emailTestTo, setEmailTestTo] = useState('');
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  // Populate fields from saved settings on first load
+  if (Object.keys(settings).length > 0 && !settingsLoaded) {
+    if (settings['telegram_bot_token']) setTelegramToken(settings['telegram_bot_token']);
+    if (settings['telegram_chat_id']) setTelegramChatId(settings['telegram_chat_id']);
+    if (settings['smtp_host']) setEmailHost(settings['smtp_host']);
+    if (settings['smtp_port']) setEmailPort(settings['smtp_port']);
+    if (settings['smtp_user']) setEmailUser(settings['smtp_user']);
+    if (settings['smtp_pass']) setEmailPass(settings['smtp_pass']);
+    if (settings['smtp_from']) setEmailFrom(settings['smtp_from']);
+    setSettingsLoaded(true);
+  }
 
   const [localConfigs, setLocalConfigs] = useState<Record<string, NotificationConfig>>({});
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -130,8 +149,24 @@ function NotificationsTab() {
   }))).map((c) => localConfigs[c.event_type] ?? c);
 
   const saveMutation = useMutation({
-    mutationFn: () => settingsApi.updateNotifications(effectiveConfigs),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['notification-configs'] }),
+    mutationFn: async () => {
+      // Save connection settings to the settings table
+      await settingsApi.updateSettings({
+        telegram_bot_token: telegramToken,
+        telegram_chat_id: telegramChatId,
+        smtp_host: emailHost,
+        smtp_port: emailPort,
+        smtp_user: emailUser,
+        smtp_pass: emailPass,
+        smtp_from: emailFrom,
+      });
+      // Save per-event notification toggles
+      return settingsApi.updateNotifications(effectiveConfigs);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notification-configs'] });
+      qc.invalidateQueries({ queryKey: ['settings'] });
+    },
   });
 
   const testMutation = useMutation({
