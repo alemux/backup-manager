@@ -201,12 +201,12 @@ export default function AddServerWizard({ onClose }: WizardProps) {
     if (nginx && selectedSources['nginx_config']) {
       sources.push({ name: 'NGINX Config', type: 'config', source_path: '/etc/nginx' });
     }
-    const vhosts = nginx?.data?.vhosts as Array<{ server_name: string; root: string }> | undefined;
+    const vhosts = nginx?.data?.vhosts as Array<{ name: string; root_path: string }> | undefined;
     if (vhosts) {
       vhosts.forEach((vh, i) => {
         const key = `vhost_${i}`;
-        if (selectedSources[key]) {
-          sources.push({ name: vh.server_name || `vhost_${i}`, type: 'web', source_path: vh.root });
+        if (selectedSources[key] && vh.root_path) {
+          sources.push({ name: vh.name || `vhost_${i}`, type: 'web', source_path: vh.root_path });
         }
       });
     }
@@ -232,6 +232,13 @@ export default function AddServerWizard({ onClose }: WizardProps) {
     const pm2 = getService('pm2');
     if (pm2 && selectedSources['pm2']) {
       sources.push({ name: 'PM2 Config', type: 'config', source_path: '/etc/pm2' });
+    }
+
+    // redis RDB dump
+    const redis = getService('redis');
+    if (redis && selectedSources['redis']) {
+      const rdbPath = (redis.data?.rdb_path as string) || '/var/lib/redis/dump.rdb';
+      sources.push({ name: 'Redis Data', type: 'database', source_path: rdbPath });
     }
 
     return sources;
@@ -506,13 +513,14 @@ export default function AddServerWizard({ onClose }: WizardProps) {
   // Linux Step 3: Source Selection
   const renderSourceSelection = () => {
     const nginx = getService('nginx');
-    const vhosts = nginx?.data?.vhosts as Array<{ server_name: string; root: string }> | undefined;
+    const vhosts = nginx?.data?.vhosts as Array<{ name: string; root_path: string }> | undefined;
     const mysql = getService('mysql');
     const databases = mysql?.data?.databases as string[] | undefined;
+    const redis = getService('redis');
     const certbot = getService('certbot');
     const pm2 = getService('pm2');
 
-    const hasAnything = nginx || mysql || certbot || pm2;
+    const hasAnything = nginx || mysql || redis || certbot || pm2;
 
     return (
       <div>
@@ -540,7 +548,7 @@ export default function AddServerWizard({ onClose }: WizardProps) {
                       checked={!!selectedSources[`vhost_${i}`]}
                       onChange={() => toggleSource(`vhost_${i}`)}
                     />
-                    {vh.server_name || `VHost ${i}`} — <span className="font-mono text-xs">{vh.root}</span>
+                    {vh.name || `VHost ${i}`} — <span className="font-mono text-xs">{vh.root_path || '(no root path)'}</span>
                   </label>
                 ))}
               </div>
@@ -583,6 +591,19 @@ export default function AddServerWizard({ onClose }: WizardProps) {
                     onChange={() => toggleSource('pm2')}
                   />
                   PM2 Configuration
+                </label>
+              </div>
+            )}
+            {redis && (
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Redis</p>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={!!selectedSources['redis']}
+                    onChange={() => toggleSource('redis')}
+                  />
+                  Redis Data (RDB dump) — <span className="font-mono text-xs">{(redis.data?.rdb_path as string) || '/var/lib/redis/dump.rdb'}</span>
                 </label>
               </div>
             )}
