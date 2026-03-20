@@ -238,8 +238,7 @@ func (h *ServersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // TestConnection handles POST /api/servers/test-connection
-// Actual SSH/FTP testing will be implemented in Task 8/9.
-// For now it returns a stub response.
+// Tests SSH or FTP connectivity without saving the server.
 func (h *ServersHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	type testRequest struct {
 		Host           string `json:"host"`
@@ -265,11 +264,69 @@ func (h *ServersHandler) TestConnection(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Stub: actual connector not implemented until Task 8/9
-	JSON(w, http.StatusOK, map[string]interface{}{
-		"success": false,
-		"message": "connection test not yet implemented (requires Task 8/9 connectors)",
-	})
+	ctx := r.Context()
+
+	switch req.ConnectionType {
+	case "ssh":
+		port := req.Port
+		if port == 0 {
+			port = 22
+		}
+		conn := connector.NewSSHConnector(connector.SSHConfig{
+			Host:       req.Host,
+			Port:       port,
+			Username:   req.Username,
+			Password:   req.Password,
+			KeyPath:    req.SSHKeyPath,
+			Timeout:    10 * time.Second,
+		})
+		if err := conn.Connect(); err != nil {
+			JSON(w, http.StatusOK, map[string]interface{}{
+				"success": false,
+				"message": fmt.Sprintf("SSH connection failed: %v", err),
+			})
+			return
+		}
+		// Try a simple command to verify the session works
+		result, err := conn.RunCommand(ctx, "echo ok")
+		conn.Close()
+		if err != nil || result.ExitCode != 0 {
+			JSON(w, http.StatusOK, map[string]interface{}{
+				"success": false,
+				"message": "SSH connected but command execution failed",
+			})
+			return
+		}
+		JSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"message": fmt.Sprintf("SSH connection to %s:%d successful", req.Host, port),
+		})
+
+	case "ftp":
+		port := req.Port
+		if port == 0 {
+			port = 21
+		}
+		conn := connector.NewFTPConnector(connector.FTPConfig{
+			Host:     req.Host,
+			Port:     port,
+			Username: req.Username,
+			Password: req.Password,
+			Timeout:  10 * time.Second,
+		})
+		if err := conn.Connect(); err != nil {
+			JSON(w, http.StatusOK, map[string]interface{}{
+				"success": false,
+				"message": fmt.Sprintf("FTP connection failed: %v", err),
+			})
+			return
+		}
+		conn.Close()
+		JSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"message": fmt.Sprintf("FTP connection to %s:%d successful", req.Host, port),
+		})
+	}
 }
 
 // Discover handles POST /api/servers/{id}/discover
