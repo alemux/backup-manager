@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -240,9 +241,9 @@ func (o *Orchestrator) ExecuteJob(ctx context.Context, jobID int) (*RunResult, e
 			result.TotalSize += sr.Size
 			result.FilesCopied += sr.FilesCopied
 
-			// Create snapshot record.
-			destPath := o.buildDestPath(server.Name, src.Type, src.Name, timestamp)
-			if err := o.createSnapshot(runID, src.ID, destPath, sr.Size, sr.Checksum); err != nil {
+			// Create snapshot record in DB (points to the timestamped snapshot).
+			snapPath := o.buildSnapshotPath(server.Name, src.Type, src.Name, timestamp)
+			if err := o.saveSnapshotRecord(runID, src.ID, snapPath, sr.Size, sr.Checksum); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("create snapshot record for source %d: %v", src.ID, err))
 			}
 		} else {
@@ -287,7 +288,10 @@ func (o *Orchestrator) executeSource(ctx context.Context, src BackupSourceRecord
 		SourceType: src.Type,
 	}
 
-	destPath := o.buildDestPath(server.Name, src.Type, src.Name, timestamp)
+	// Incremental strategy: rsync to "current/" (only changed bytes transferred),
+	// then create a hard-link snapshot for retention (near-zero extra space).
+	currentPath := o.buildCurrentPath(server.Name, src.Type, src.Name)
+	snapshotPath := o.buildSnapshotPath(server.Name, src.Type, src.Name, timestamp)
 
 	// Build exclude list: defaults + global setting + per-source patterns
 	excludes := o.buildExcludes(src.ExcludePatterns)
@@ -305,17 +309,26 @@ func (o *Orchestrator) executeSource(ctx context.Context, src BackupSourceRecord
 		}
 		opts := sync.SyncOptions{
 			Exclude: excludes,
+			Delete:  true, // remove files locally that were deleted on remote
 		}
 		if job.BandwidthLimit != nil {
 			opts.BandwidthLimitKBps = *job.BandwidthLimit * 1024 // convert Mbps to KBps
 		}
 
-		result, err := syncer.Sync(ctx, source, destPath, opts)
+		// Sync to "current/" — only transfers changed bytes (incremental)
+		result, err := syncer.Sync(ctx, source, currentPath, opts)
 		if err != nil {
 			sr.Status = "failed"
 			sr.Error = fmt.Sprintf("sync source %q: %v", src.Name, err)
 			return sr
 		}
+
+		// Create timestamped snapshot via hard links (near-zero space for unchanged files)
+		if err := o.createSnapshot(currentPath, snapshotPath); err != nil {
+			// Snapshot failed but sync succeeded — still count as success
+			sr.Error = fmt.Sprintf("snapshot creation failed: %v", err)
+		}
+
 		sr.Status = "success"
 		sr.Size = result.BytesCopied
 		sr.FilesCopied = result.FilesCopied
@@ -333,11 +346,15 @@ func (o *Orchestrator) executeSource(ctx context.Context, src BackupSourceRecord
 			KeyPath:    server.SSHKeyPath,
 			RemotePath: src.DBName,
 		}
-		result, err := syncer.Sync(ctx, source, destPath, sync.SyncOptions{})
+		result, err := syncer.Sync(ctx, source, currentPath, sync.SyncOptions{})
 		if err != nil {
 			sr.Status = "failed"
 			sr.Error = fmt.Sprintf("database backup %q: %v", src.Name, err)
 			return sr
+		}
+		// Create snapshot for databases too
+		if snapErr := o.createSnapshot(currentPath, snapshotPath); snapErr != nil {
+			sr.Error = fmt.Sprintf("db snapshot creation failed: %v", snapErr)
 		}
 		sr.Status = "success"
 		sr.Size = result.BytesCopied
@@ -359,11 +376,31 @@ func (o *Orchestrator) chooseSyncer(serverType string) sync.Syncer {
 	return o.rsyncSyncer
 }
 
-// buildDestPath constructs the destination path for a backup.
-// Uses the primary destination from the DB, falling back to the default backupDir.
-func (o *Orchestrator) buildDestPath(serverName, sourceType, sourceName, timestamp string) string {
+// buildCurrentPath returns the "current" sync target — rsync always syncs here (incremental).
+func (o *Orchestrator) buildCurrentPath(serverName, sourceType, sourceName string) string {
+	baseDir := o.loadPrimaryDestPath()
+	return filepath.Join(baseDir, serverName, sourceType, sourceName, "current")
+}
+
+// buildSnapshotPath returns the timestamped snapshot path for retention.
+func (o *Orchestrator) buildSnapshotPath(serverName, sourceType, sourceName, timestamp string) string {
 	baseDir := o.loadPrimaryDestPath()
 	return filepath.Join(baseDir, serverName, sourceType, sourceName, timestamp)
+}
+
+// createSnapshot creates a hard-link copy of "current" as a timestamped snapshot.
+// Hard links mean files that haven't changed share disk blocks — very space-efficient.
+func (o *Orchestrator) createSnapshot(currentPath, snapshotPath string) error {
+	// Use cp -al (hard link copy) on Linux/macOS
+	cmd := exec.CommandContext(context.Background(), "cp", "-al", currentPath, snapshotPath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		// Fallback: on macOS, cp -al may not work. Try rsync --link-dest instead.
+		cmd2 := exec.CommandContext(context.Background(), "rsync", "-a", "--link-dest="+currentPath+"/", currentPath+"/", snapshotPath+"/")
+		if output2, err2 := cmd2.CombinedOutput(); err2 != nil {
+			return fmt.Errorf("snapshot failed: cp: %s, rsync: %s", string(output), string(output2))
+		}
+	}
+	return nil
 }
 
 // --- Database helpers ---
@@ -487,7 +524,7 @@ func (o *Orchestrator) updateRunStatus(runID int, status string, totalSize int64
 	return err
 }
 
-func (o *Orchestrator) createSnapshot(runID, sourceID int, snapshotPath string, sizeBytes int64, checksum string) error {
+func (o *Orchestrator) saveSnapshotRecord(runID, sourceID int, snapshotPath string, sizeBytes int64, checksum string) error {
 	_, err := o.db.DB().Exec(
 		`INSERT INTO backup_snapshots (run_id, source_id, snapshot_path, size_bytes, checksum_sha256)
 		 VALUES (?, ?, ?, ?, ?)`,

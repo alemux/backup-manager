@@ -74,6 +74,21 @@ func (m *Manager) Notify(event NotificationEvent) error {
 	telegramAttempted := false
 	emailAttempted := false
 
+	// If per-event chat ID is empty, fall back to global setting
+	if cfg.TelegramChatID == "" {
+		var globalChatID string
+		if err := m.db.DB().QueryRow("SELECT value FROM settings WHERE key='telegram_chat_id'").Scan(&globalChatID); err == nil {
+			cfg.TelegramChatID = globalChatID
+		}
+	}
+	// If per-event email recipients is empty, fall back to global setting
+	if cfg.EmailRecipients == "" {
+		var globalEmail string
+		if err := m.db.DB().QueryRow("SELECT value FROM settings WHERE key='smtp_from'").Scan(&globalEmail); err == nil {
+			cfg.EmailRecipients = globalEmail
+		}
+	}
+
 	// --- Telegram ---
 	if cfg.TelegramEnabled && cfg.TelegramChatID != "" && m.telegram != nil {
 		telegramAttempted = true
