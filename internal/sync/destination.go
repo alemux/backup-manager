@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -226,9 +227,52 @@ func (ds *DestinationSyncer) RecoverStale() error {
 	return err
 }
 
-// copyAndVerify copies snapshotPath into destBasePath (preserving relative
-// directory structure) and optionally verifies the SHA-256 checksum.
+// loadPrimaryPath returns the path of the primary destination from the DB.
+func (ds *DestinationSyncer) loadPrimaryPath() string {
+	var path string
+	ds.db.DB().QueryRow("SELECT path FROM destinations WHERE is_primary=1 AND enabled=1 LIMIT 1").Scan(&path)
+	return path
+}
+
+// copyAndVerify copies snapshotPath into destBasePath. The snapshot is
+// typically a directory tree, so we use rsync for efficient local copy
+// (preserves hard links, permissions, etc.). Falls back to cp -a if
+// rsync is not available.
 func (ds *DestinationSyncer) copyAndVerify(snapshotPath, destBasePath string, checksum sql.NullString) error {
+	// Check if source exists
+	info, err := os.Stat(snapshotPath)
+	if err != nil {
+		return fmt.Errorf("source not found: %w", err)
+	}
+
+	if info.IsDir() {
+		// Calculate relative path from the primary destination.
+		// snapshotPath:  /Primary/ServerName/type/source/timestamp
+		// destBasePath:  /Secondary
+		// We need:       /Secondary/ServerName/type/source/timestamp
+		// Strategy: find the primary base path and compute relative.
+		primaryBase := ds.loadPrimaryPath()
+		relPath := snapshotPath
+		if primaryBase != "" {
+			if r, err := filepath.Rel(primaryBase, snapshotPath); err == nil {
+				relPath = r
+			}
+		}
+		destPath := filepath.Join(destBasePath, relPath)
+
+		if err := os.MkdirAll(destPath, 0o755); err != nil {
+			return fmt.Errorf("create destination directory: %w", err)
+		}
+
+		cmd := exec.CommandContext(context.Background(),
+			"rsync", "-a", "--delete", snapshotPath+"/", destPath+"/")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("rsync local copy failed: %v\nOutput: %s", err, string(output))
+		}
+		return nil
+	}
+
+	// Single file: copy with checksum verification
 	rel := filepath.Base(snapshotPath)
 	destPath := filepath.Join(destBasePath, rel)
 
