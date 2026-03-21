@@ -24,6 +24,7 @@ import (
 	"github.com/backupmanager/backupmanager/internal/discovery"
 	"github.com/backupmanager/backupmanager/internal/notification"
 	"github.com/backupmanager/backupmanager/internal/setup"
+	bmsync "github.com/backupmanager/backupmanager/internal/sync"
 	ws "github.com/backupmanager/backupmanager/internal/websocket"
 )
 
@@ -167,6 +168,12 @@ func main() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 			defer cancel()
 			runResult, err := runner.Run(ctx, jobID)
+
+			// Process secondary destination sync queue
+			destSyncer := bmsync.NewDestinationSyncer(db)
+			if syncErr := destSyncer.ProcessQueue(ctx); syncErr != nil {
+				log.Printf("Secondary sync error for job %d: %v", jobID, syncErr)
+			}
 
 			// Send notification
 			if err != nil {

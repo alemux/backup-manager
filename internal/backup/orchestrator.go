@@ -74,6 +74,7 @@ type Orchestrator struct {
 	rsyncSyncer    sync.Syncer
 	ftpSyncer      sync.Syncer
 	mysqlDumper    *MySQLDumpOrchestrator
+	destSyncer     *sync.DestinationSyncer // syncs snapshots to secondary destinations
 	backupDir      string // base directory for backup storage
 	skipPreflight  bool   // if true, skip pre-flight checks (for testing)
 	credKey        []byte // AES key for decrypting server credentials
@@ -86,6 +87,7 @@ func NewOrchestrator(db *database.Database) *Orchestrator {
 		rsyncSyncer: sync.NewRsyncSyncer(),
 		ftpSyncer:   sync.NewFTPSyncer(),
 		mysqlDumper: NewMySQLDumpOrchestrator(),
+		destSyncer:  sync.NewDestinationSyncer(db),
 		backupDir:   "/var/backups/backupmanager",
 	}
 }
@@ -243,8 +245,14 @@ func (o *Orchestrator) ExecuteJob(ctx context.Context, jobID int) (*RunResult, e
 
 			// Create snapshot record in DB (points to the timestamped snapshot).
 			snapPath := o.buildSnapshotPath(server.Name, src.Type, src.Name, timestamp)
-			if err := o.saveSnapshotRecord(runID, src.ID, snapPath, sr.Size, sr.Checksum); err != nil {
+			snapID, err := o.saveSnapshotRecord(runID, src.ID, snapPath, sr.Size, sr.Checksum)
+			if err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("create snapshot record for source %d: %v", src.ID, err))
+			} else if o.destSyncer != nil {
+				// Queue copy to secondary destinations
+				if qErr := o.destSyncer.QueueSync(snapID); qErr != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("queue secondary sync for snapshot %d: %v", snapID, qErr))
+				}
 			}
 		} else {
 			failedSources[src.ID] = true
@@ -524,13 +532,17 @@ func (o *Orchestrator) updateRunStatus(runID int, status string, totalSize int64
 	return err
 }
 
-func (o *Orchestrator) saveSnapshotRecord(runID, sourceID int, snapshotPath string, sizeBytes int64, checksum string) error {
-	_, err := o.db.DB().Exec(
+func (o *Orchestrator) saveSnapshotRecord(runID, sourceID int, snapshotPath string, sizeBytes int64, checksum string) (int, error) {
+	result, err := o.db.DB().Exec(
 		`INSERT INTO backup_snapshots (run_id, source_id, snapshot_path, size_bytes, checksum_sha256)
 		 VALUES (?, ?, ?, ?, ?)`,
 		runID, sourceID, snapshotPath, sizeBytes, checksum,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	id, _ := result.LastInsertId()
+	return int(id), nil
 }
 
 // buildExcludes merges defaultExcludes, global exclude patterns from settings,
