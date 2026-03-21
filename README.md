@@ -8,18 +8,43 @@ BackupManager connects to your servers (Linux via SSH, Windows via FTP), copies 
 
 ### Key Features
 
-- **Incremental Backups** — rsync for Linux (delta transfer), FTP with manifest-based change detection for Windows
+- **Incremental Backups** — rsync to a `current/` directory (only changed bytes transferred), then hard-link snapshots for retention (multiple snapshots share disk space for unchanged files)
+- **Smart Excludes** — automatically skips `node_modules`, `.git`, `__pycache__`, `vendor`, `dist`, `build`, `.env`, `*.log` etc. Configurable globally and per-source
 - **MySQL Dump Orchestration** — connects via SSH, runs mysqldump, copies the dump, verifies checksum, cleans up old dumps on the remote server
-- **Auto-Discovery** — scans Linux servers to find NGINX, MySQL, PM2, Certbot, Node.js, crontab, UFW automatically
-- **Retention Policies** — configurable daily/weekly/monthly snapshot retention with automatic cleanup
-- **Health Monitoring** — checks server reachability, disk space, service status every 5 minutes
-- **Notifications** — Telegram bot + SMTP email with anti-flood protection
-- **Disaster Recovery Playbooks** — interactive step-by-step guides with copy-paste commands
-- **AI Assistant** — integrated LLM chat with context from your servers, logs, and backup status
-- **Multi-Destination** — backup to local disk, NAS, USB, with independent sync status tracking
-- **Encryption at Rest** — AES-256-GCM with Argon2 key wrapping
-- **Audit Log** — tracks every action with user, timestamp, IP
+- **Auto-Discovery** — scans Linux servers to find NGINX, MySQL, Redis, PM2, Certbot, Node.js, crontab, UFW automatically
+- **Periodic Rescan** — every 24h re-scans servers, detects changes (new databases, removed vhosts, new services), notifies you, auto-regenerates recovery playbooks
+- **Retention Policies** — configurable daily/weekly/monthly snapshot retention with automatic cleanup, timezone-aware
+- **Health Monitoring** — checks server reachability, disk space, service status (NGINX, MySQL, Redis, PM2) every 5 minutes
+- **Notifications** — Telegram bot + SMTP email with anti-flood protection. Notifies on backup success/failure, server issues, discovery changes
+- **Disaster Recovery Playbooks** — auto-generated interactive step-by-step guides with copy-paste commands. Auto-updated when server configuration changes
+- **AI Assistant** — integrated LLM chat (OpenAI/Anthropic) with context from your servers, logs, and backup status
+- **Multi-Destination** — primary destination (where backups are saved) + secondary destinations (NAS, USB, cloud) with automatic replication and sync status tracking
+- **Encryption at Rest** — AES-256-GCM with Argon2 key wrapping for backup files and server credentials
+- **Audit Log** — tracks every action with user, timestamp, IP. CSV export
 - **Single Binary** — zero dependencies, just run `./backupmanager`
+
+## How Backups Work
+
+```
+Server remoto                    BackupManager
+                                 ┌─────────────────────────────┐
+/var/www/project/ ──rsync──────► │ Primary Destination         │
+/etc/nginx/       (incremental)  │ /backups/server/current/    │
+/root/.pm2/                      │         │                   │
+/etc/letsencrypt/                │         ▼ hard-link snapshot│
+                                 │ /backups/server/2026-03-21/ │
+                                 │ /backups/server/2026-03-20/ │
+                                 │         │                   │
+                                 │         ▼ auto-sync         │
+                                 │ Secondary Destinations      │
+                                 │ (NAS, USB, cloud)           │
+                                 └─────────────────────────────┘
+```
+
+**Incremental:** rsync transfers only changed bytes to `current/`. After sync, a timestamped snapshot is created using hard links — unchanged files share disk blocks, so 10 snapshots of mostly-identical data use barely more space than 1 copy.
+
+**Default excludes** (configurable globally and per-source):
+`node_modules`, `.git`, `__pycache__`, `.cache`, `.npm`, `.next`, `vendor`, `dist`, `build`, `.env`, `*.log`, `*.tmp`, `*.swp`
 
 ## Architecture
 
@@ -35,8 +60,8 @@ BackupManager connects to your servers (Linux via SSH, Windows via FTP), copies 
 │  │ REST API    │  │ Orchestrator│  │ MySQL Dump Engine        │ │
 │  │ WebSocket   │  │ Retention   │  │ Rsync/Incremental Engine │ │
 │  │ Auth+JWT    │  │ Integrity   │  │ Encryption (AES-256)     │ │
-│  │             │  │ Health Check│  │ Notifier (TG + Email)    │ │
-│  │             │  │ Audit Log   │  │ LLM Client               │ │
+│  │ CSRF        │  │ Health Check│  │ Notifier (TG + Email)    │ │
+│  │ Rate Limit  │  │ Audit Log   │  │ LLM Client               │ │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
 │                                                                 │
 │                    ┌──────────────┐                              │
@@ -53,6 +78,8 @@ BackupManager connects to your servers (Linux via SSH, Windows via FTP), copies 
 
 - Go 1.22+ (`brew install go` on macOS, `sudo apt install golang` on Ubuntu)
 - Node.js 18+ (for building the frontend)
+- `sshpass` for SSH password authentication (`brew install sshpass` / `sudo apt install sshpass`)
+- `rsync` (pre-installed on most Linux/macOS systems)
 
 ### Build & Run
 
@@ -76,109 +103,122 @@ go build -o backupmanager ./cmd/server
 
 Open `http://localhost:8080` in your browser. Default credentials: `admin` / `admin`.
 
+**Important:** Change the default password after first login.
+
+### First-Time Setup
+
+1. **Login** with `admin` / `admin`
+2. **Settings > Destinations** — configure your Primary Destination (where backups are saved) and optionally secondary destinations (NAS, USB)
+3. **Settings > Notifications** — add Telegram bot token + chat ID, SMTP config. Enable per-event notifications. Click "Save Changes"
+4. **Servers > Add Server** — add your Linux (SSH) or Windows (FTP) servers
+5. **Jobs > Create Job** — schedule backups with cron expressions
+6. **Jobs > Run Now** — test your first backup
+
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BM_PORT` | `8080` | HTTP server port |
-| `BM_DATA_DIR` | `./data` | Data directory (database, backups, logs) |
+| `BM_DATA_DIR` | `./data` | Data directory (database, logs) |
 | `BM_JWT_SECRET` | auto-generated | JWT signing secret (persisted in DB) |
 | `BM_LOG_LEVEL` | `info` | Log level |
 | `BM_TIMEZONE` | `Local` | Timezone for retention calculations |
 
+**Note:** Backup storage location is configured in Settings > Destinations, not via environment variables.
+
 ### Using the Makefile
 
 ```bash
-make build        # Build frontend + Go binary
+make build        # Build frontend + embed + Go binary
 make run          # Run the server (dev mode)
 make test         # Run all tests
 make clean        # Remove binary and data
 ```
 
-## Project Status
+## Pages & Features
 
-### Phase 1: Foundation ✅
-- [x] Go project scaffold, config, Makefile
-- [x] SQLite database with full 19-table schema
-- [x] Authentication (bcrypt + JWT + auto-refresh)
-- [x] Auth API (login, logout, password reset)
-- [x] React frontend shell (login, layout, sidebar, routing)
-- [x] Embedded frontend in single Go binary
+| Page | What it does |
+|------|-------------|
+| **Dashboard** | Server status, recent backups, disk usage chart, active alerts, live WebSocket updates |
+| **Servers** | Add/manage servers, auto-discovery, rescan with change detection, manage backup sources |
+| **Jobs** | Create/schedule backup jobs, manual trigger, run history with status |
+| **Snapshots** | Calendar view, filter by server/type/date, download snapshots |
+| **Recovery** | Auto-generated disaster recovery playbooks with interactive step-by-step wizard |
+| **Docs** | Built-in documentation with full-text search |
+| **Assistant** | AI chat (OpenAI/Anthropic) with server/backup context |
+| **Settings** | Notifications (Telegram/Email), destinations (primary/secondary), encryption, users, global excludes |
+| **Audit Log** | Action history with filters and CSV export |
 
-### Phase 2: Server Management ✅
-- [x] Server CRUD API + connection test
-- [x] SSH connector (command execution + SFTP)
-- [x] FTP connector (file transfer)
-- [x] Auto-discovery service (NGINX, MySQL, PM2, Certbot, Node.js, Crontab, UFW)
-- [x] Backup sources CRUD with dependency cycle detection
-- [x] Servers UI with Add Server wizard (Linux 6-step / Windows 4-step)
+## Auto-Discovery
 
-### Phase 3: Backup Engine ✅
-- [x] Incremental sync (rsync via SSH with bandwidth limiting)
-- [x] FTP incremental sync with manifest-based change detection + rate limiting
-- [x] MySQL dump orchestrator (remote execution, checksum verification, cleanup)
-- [x] Job runner + orchestrator with dependency graph (topological sort)
-- [x] Cron scheduler with missed backup detection
-- [x] Retention policy engine (daily/weekly/monthly, timezone-aware)
-- [x] Jobs API (CRUD, manual trigger, runs history with pagination)
-- [x] Jobs UI (schedule selector, run history, manual trigger)
+When you add a Linux server, BackupManager scans for installed services:
 
-### Phase 4: Monitoring & Notifications ✅
-- [x] Health check system (Linux SSH checks + Windows FTP checks, configurable thresholds)
-- [x] Telegram notifier with anti-flood protection
-- [x] Email notifier (SMTP) with HTML templates
-- [x] Notification manager (central dispatcher, config API, test send)
-- [x] WebSocket real-time updates (hub with auto-reconnect)
-- [x] Dashboard UI (live status, backup timeline, disk usage chart, alerts)
+| Service | What it detects |
+|---------|----------------|
+| **NGINX** | Version, vhosts, root paths |
+| **MySQL** | Version, database list |
+| **Redis** | Version, status, RDB dump path, database count |
+| **PM2** | Processes, paths, status |
+| **Certbot** | Certificates, domains, expiry dates |
+| **Node.js** | Version |
+| **Crontab** | Scheduled jobs |
+| **UFW** | Firewall status and rules |
 
-### Phase 5: Security & Integrity ✅
-- [x] AES-256-GCM encryption at rest with Argon2id key wrapping
-- [x] Backup integrity verification (checksum + SQL dump validation)
-- [x] Audit log with filtering, pagination, CSV export, middleware
-- [x] CSRF protection (double-submit cookie) + login rate limiting (SQLite-persisted)
-- [x] Credential encryption in database (server passwords, SSH keys)
+Auto-rescan runs every 24 hours. If changes are detected (new database, removed vhost, new PM2 process), you get a notification and recovery playbooks are auto-regenerated.
 
-### Phase 6: Advanced Features ✅
-- [x] Multi-destination sync with retry and status tracking
-- [x] Snapshots UI with calendar navigation, filters, detail view
-- [x] Disaster recovery playbooks with auto-generation and interactive wizard
-- [x] AI assistant with context-aware LLM integration (OpenAI/Anthropic)
-- [x] Documentation page with full-text search
-- [x] Settings UI (notifications, destinations, encryption, users, general)
-- [x] Audit log UI with filters and CSV export
-- [x] Bandwidth throttling + pre-flight checks + SQLite self-backup
-- [x] Startup crash recovery (stale runs, partial files cleanup)
-- [x] Complete technical documentation (9 docs, ~12,500 words)
+## Security
 
-## Documentation
-
-Detailed technical documentation is available in the `docs/` directory:
-
-| Document | Description |
-|----------|-------------|
-| [Design Specification](docs/superpowers/specs/2026-03-18-backupmanager-design.md) | Complete system design — architecture, backup engine, frontend, security, health checks, notifications, auto-discovery, AI assistant, multi-destination |
-| [Implementation Plan](docs/superpowers/plans/2026-03-18-backupmanager-plan.md) | 40-task implementation plan divided into 6 phases, with TDD approach and exact file paths |
+- **Authentication:** bcrypt password hashing, JWT in httpOnly cookies with SameSite=Strict
+- **CSRF:** double-submit cookie pattern on all state-changing requests
+- **Rate limiting:** 5 login attempts per 5 minutes, 15-minute block (SQLite-persisted)
+- **Credential encryption:** server passwords and SSH keys encrypted with AES-256 in the database
+- **Backup encryption:** optional AES-256-GCM file encryption with Argon2id key wrapping
+- **Audit trail:** every action logged with user, timestamp, IP address
 
 ## Project Structure
 
 ```
 backup-manager/
-├── cmd/server/main.go          # Entry point (embeds frontend)
+├── cmd/server/main.go              # Entry point (embeds frontend)
 ├── internal/
-│   ├── api/                    # REST API handlers + router
-│   ├── auth/                   # JWT, bcrypt, middleware, password reset
-│   ├── config/                 # Environment-based configuration
-│   ├── database/               # SQLite connection, migrations, schema
-│   └── setup/                  # First-run admin user + data dirs
-├── frontend/                   # React 18 + TypeScript + Tailwind
+│   ├── api/                        # REST API handlers + router (50+ endpoints)
+│   ├── assistant/                  # AI assistant with context builder
+│   ├── audit/                      # Audit logging service + middleware
+│   ├── auth/                       # JWT, bcrypt, middleware, password reset
+│   ├── backup/                     # Orchestrator, runner, MySQL dump, preflight, recovery
+│   ├── config/                     # Environment-based configuration
+│   ├── connector/                  # SSH and FTP connectors
+│   ├── database/                   # SQLite connection, migrations, credential encryption
+│   ├── discovery/                  # Auto-discovery, rescan, change detection
+│   ├── docs/                       # Embedded user documentation (markdown)
+│   ├── encryption/                 # AES-256-GCM file encryption, key management
+│   ├── health/                     # Proactive health checks
+│   ├── integrity/                  # Backup integrity verification
+│   ├── notification/               # Telegram, Email, notification manager
+│   ├── recovery/                   # Disaster recovery playbook generator
+│   ├── retention/                  # Retention policy engine
+│   ├── scheduler/                  # Cron scheduler with missed backup detection
+│   ├── setup/                      # First-run admin user + data dirs
+│   ├── sync/                       # rsync, FTP sync, manifest, multi-destination
+│   └── websocket/                  # Real-time WebSocket hub
+├── frontend/                       # React 18 + TypeScript + Tailwind
 │   ├── src/
-│   │   ├── components/         # Layout, Sidebar
-│   │   ├── pages/              # Login, Dashboard, placeholders
-│   │   ├── hooks/              # useAuth
-│   │   ├── api/                # API client
-│   │   └── types/              # TypeScript types
+│   │   ├── components/             # Layout, Sidebar, AddServerWizard, JobCard, etc.
+│   │   ├── pages/                  # Dashboard, Servers, Jobs, Snapshots, Recovery, etc.
+│   │   ├── hooks/                  # useAuth, useWebSocket
+│   │   ├── api/                    # Typed API clients (servers, jobs, snapshots, etc.)
+│   │   └── types/                  # TypeScript interfaces
 │   └── package.json
-├── docs/                       # Design spec + implementation plan
+├── docs/                           # Technical documentation (9 documents)
+│   ├── architecture.md
+│   ├── web-layer.md
+│   ├── core-layer.md
+│   ├── infrastructure-layer.md
+│   ├── api-reference.md
+│   ├── database-schema.md
+│   ├── deployment-guide.md
+│   ├── development-guide.md
+│   └── disaster-recovery.md
 ├── Makefile
 └── go.mod
 ```
@@ -192,17 +232,78 @@ make run
 # Run React frontend dev server (with hot reload, proxies to :8080)
 cd frontend && npm run dev
 
-# Run tests
+# Run all backend tests
 make test
+
+# Run tests for a specific package
+go test github.com/backupmanager/backupmanager/internal/backup/ -v
+```
+
+## Deployment on Ubuntu
+
+```bash
+# Install dependencies
+sudo apt update && sudo apt install -y golang nodejs npm rsync sshpass
+
+# Build
+cd backup-manager
+cd frontend && npm ci && npm run build && cd ..
+cp -r frontend/dist cmd/server/static
+go build -o backupmanager ./cmd/server
+
+# Create systemd service
+sudo tee /etc/systemd/system/backupmanager.service << 'EOF'
+[Unit]
+Description=BackupManager
+After=network.target
+
+[Service]
+Type=simple
+User=backupmanager
+WorkingDirectory=/opt/backupmanager
+ExecStart=/opt/backupmanager/backupmanager
+Environment=BM_PORT=8080
+Environment=BM_DATA_DIR=/opt/backupmanager/data
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Install and start
+sudo mkdir -p /opt/backupmanager
+sudo cp backupmanager /opt/backupmanager/
+sudo useradd -r -s /bin/false backupmanager
+sudo chown -R backupmanager:backupmanager /opt/backupmanager
+sudo systemctl daemon-reload
+sudo systemctl enable backupmanager
+sudo systemctl start backupmanager
 ```
 
 ## Target Hardware
 
 Designed for a dedicated backup machine:
-- CPU: Intel i5 9th gen or equivalent
-- RAM: 32GB (Go uses very little — most is for the OS cache)
-- Storage: as much as your backups need
-- OS: Ubuntu Linux (recommended)
+- **CPU:** Intel i5 9th gen or equivalent (any modern CPU works)
+- **RAM:** 32GB recommended (Go uses very little — most is for OS cache)
+- **Storage:** as much as your backups need
+- **OS:** Ubuntu Linux 22.04+ recommended
+- **Network:** LAN access to servers being backed up
+
+## Documentation
+
+Technical documentation is available in the `docs/` directory:
+
+| Document | Description |
+|----------|-------------|
+| [Design Specification](docs/superpowers/specs/2026-03-18-backupmanager-design.md) | Complete system design (12 sections) |
+| [Implementation Plan](docs/superpowers/plans/2026-03-18-backupmanager-plan.md) | 40-task implementation plan (6 phases) |
+| [Architecture](docs/architecture.md) | System architecture and data flow |
+| [API Reference](docs/api-reference.md) | All 50+ REST endpoints |
+| [Database Schema](docs/database-schema.md) | All tables and relationships |
+| [Deployment Guide](docs/deployment-guide.md) | Production installation |
+| [Development Guide](docs/development-guide.md) | Dev setup and contributing |
+| [Disaster Recovery](docs/disaster-recovery.md) | What to do if the backup server fails |
 
 ## License
 
