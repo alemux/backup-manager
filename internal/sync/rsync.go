@@ -135,11 +135,80 @@ func (r *RsyncSyncer) Sync(ctx context.Context, source SyncSource, destPath stri
 	return result, nil
 }
 
+// DryRun executes rsync with --dry-run --stats and returns what would be transferred.
+func (r *RsyncSyncer) DryRun(ctx context.Context, source SyncSource, destPath string, opts SyncOptions) (*DryRunResult, error) {
+	opts.DryRun = true
+	args := r.BuildCommand(source, destPath, opts)
+
+	if _, err := exec.LookPath("rsync"); err != nil {
+		return nil, fmt.Errorf("rsync binary not found: %w", err)
+	}
+
+	var cmd *exec.Cmd
+	if source.Password != "" {
+		if sshpassPath, lookErr := exec.LookPath("sshpass"); lookErr == nil {
+			sshpassArgs := append([]string{"-p", source.Password, "rsync"}, args...)
+			cmd = exec.CommandContext(ctx, sshpassPath, sshpassArgs...)
+		} else {
+			cmd = exec.CommandContext(ctx, "rsync", args...)
+			cmd.Env = append(os.Environ(), "RSYNC_PASSWORD="+source.Password)
+		}
+	} else {
+		cmd = exec.CommandContext(ctx, "rsync", args...)
+	}
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	err := cmd.Run()
+	output := out.String()
+
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		exitCode := 0
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+		if exitCode != 23 && exitCode != 24 {
+			return nil, fmt.Errorf("rsync dry-run failed: %v\nOutput: %s", err, output)
+		}
+	}
+
+	result := ParseDryRunStats(output)
+	return result, nil
+}
+
+// ParseDryRunStats extracts dry-run statistics from rsync --dry-run --stats output.
+func ParseDryRunStats(output string) *DryRunResult {
+	result := &DryRunResult{}
+
+	if m := reTotalFiles.FindStringSubmatch(output); m != nil {
+		result.TotalFiles = parseIntField(m[1])
+	}
+	if m := reFilesCopied.FindStringSubmatch(output); m != nil {
+		result.FilesToTransfer = parseIntField(m[1])
+	}
+	if m := reBytescopied.FindStringSubmatch(output); m != nil {
+		result.BytesToTransfer = parseInt64Field(m[1])
+	}
+	if m := reTotalSize.FindStringSubmatch(output); m != nil {
+		result.BytesTotal = parseInt64Field(m[1])
+	}
+
+	result.HumanSize = HumanizeBytes(result.BytesToTransfer)
+	return result
+}
+
 // Compile regex patterns once at package level for efficiency.
 var (
 	reFilesCopied  = regexp.MustCompile(`Number of (?:regular )?files transferred:\s*([\d,]+)`)
 	reBytescopied  = regexp.MustCompile(`Total transferred file size:\s*([\d,]+)`)
 	reFilesDeleted = regexp.MustCompile(`Number of deleted files:\s*([\d,]+)`)
+	reTotalFiles   = regexp.MustCompile(`Number of files:\s*([\d,]+)`)
+	reTotalSize    = regexp.MustCompile(`Total file size:\s*([\d,]+)`)
 )
 
 // ParseRsyncStats extracts transfer statistics from rsync --stats output.

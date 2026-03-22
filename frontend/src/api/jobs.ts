@@ -41,6 +41,28 @@ export interface RunsResponse {
   per_page: number;
 }
 
+export interface AnalysisSourceResult {
+  source_id: number;
+  source_name: string;
+  source_type: string;
+  total_files: number;
+  files_to_transfer: number;
+  bytes_to_transfer: number;
+  bytes_total: number;
+  human_size: string;
+  human_total: string;
+  error?: string;
+}
+
+export interface AnalysisResult {
+  sources: AnalysisSourceResult[];
+  total_bytes_to_transfer: number;
+  total_bytes_all: number;
+  total_files_to_transfer: number;
+  human_total_transfer: string;
+  human_total_all: string;
+}
+
 export const jobsApi = {
   list: () => request<Job[]>('/api/jobs'),
   create: (data: unknown) =>
@@ -52,6 +74,8 @@ export const jobsApi = {
     request<void>(`/api/jobs/${id}`, { method: 'DELETE' }),
   trigger: (id: number) =>
     request<{ run_id: number }>(`/api/jobs/${id}/trigger`, { method: 'POST' }),
+  analyze: (id: number) =>
+    request<AnalysisResult>(`/api/jobs/${id}/analyze`, { method: 'POST' }),
   listRuns: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return request<RunsResponse>(`/api/runs${qs}`);

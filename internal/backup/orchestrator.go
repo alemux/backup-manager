@@ -146,6 +146,122 @@ type jobRecord struct {
 	BandwidthLimit *int
 }
 
+// AnalysisSourceResult holds dry-run info for a single source.
+type AnalysisSourceResult struct {
+	SourceID        int    `json:"source_id"`
+	SourceName      string `json:"source_name"`
+	SourceType      string `json:"source_type"`
+	TotalFiles      int    `json:"total_files"`
+	FilesToTransfer int    `json:"files_to_transfer"`
+	BytesToTransfer int64  `json:"bytes_to_transfer"`
+	BytesTotal      int64  `json:"bytes_total"`
+	HumanSize       string `json:"human_size"`
+	HumanTotal      string `json:"human_total"`
+	Error           string `json:"error,omitempty"`
+}
+
+// AnalysisResult holds the aggregated dry-run analysis for an entire job.
+type AnalysisResult struct {
+	Sources              []AnalysisSourceResult `json:"sources"`
+	TotalBytesToTransfer int64                  `json:"total_bytes_to_transfer"`
+	TotalBytesAll        int64                  `json:"total_bytes_all"`
+	TotalFilesToTransfer int                    `json:"total_files_to_transfer"`
+	HumanTotalTransfer   string                 `json:"human_total_transfer"`
+	HumanTotalAll        string                 `json:"human_total_all"`
+}
+
+// AnalyzeJob runs rsync --dry-run for each source to estimate transfer sizes.
+func (o *Orchestrator) AnalyzeJob(ctx context.Context, jobID int) (*AnalysisResult, error) {
+	job, err := o.loadJob(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("load job: %w", err)
+	}
+
+	server, err := o.loadServer(job.ServerID)
+	if err != nil {
+		return nil, fmt.Errorf("load server: %w", err)
+	}
+
+	sources, err := o.loadJobSources(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("load job sources: %w", err)
+	}
+
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("job %d has no sources", jobID)
+	}
+
+	result := &AnalysisResult{
+		Sources: make([]AnalysisSourceResult, 0, len(sources)),
+	}
+
+	rsyncSyncer, ok := o.rsyncSyncer.(*sync.RsyncSyncer)
+	if !ok {
+		return nil, fmt.Errorf("analysis requires rsync syncer")
+	}
+
+	for _, src := range sources {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		asr := AnalysisSourceResult{
+			SourceID:   src.ID,
+			SourceName: src.Name,
+			SourceType: src.Type,
+		}
+
+		if src.Type == "database" {
+			asr.Error = "database sources cannot be analyzed with dry-run"
+			result.Sources = append(result.Sources, asr)
+			continue
+		}
+
+		currentPath := o.buildCurrentPath(server.Name, src.Type, src.Name)
+		excludes := o.buildExcludes(src.ExcludePatterns)
+
+		source := sync.SyncSource{
+			Host:       server.Host,
+			Port:       server.Port,
+			Username:   server.Username,
+			Password:   server.Password,
+			KeyPath:    server.SSHKeyPath,
+			RemotePath: src.SourcePath,
+		}
+		opts := sync.SyncOptions{
+			Exclude: excludes,
+			Delete:  true,
+		}
+		if job.BandwidthLimit != nil {
+			opts.BandwidthLimitKBps = *job.BandwidthLimit * 1024
+		}
+
+		dryResult, err := rsyncSyncer.DryRun(ctx, source, currentPath, opts)
+		if err != nil {
+			asr.Error = err.Error()
+			result.Sources = append(result.Sources, asr)
+			continue
+		}
+
+		asr.TotalFiles = dryResult.TotalFiles
+		asr.FilesToTransfer = dryResult.FilesToTransfer
+		asr.BytesToTransfer = dryResult.BytesToTransfer
+		asr.BytesTotal = dryResult.BytesTotal
+		asr.HumanSize = dryResult.HumanSize
+		asr.HumanTotal = sync.HumanizeBytes(dryResult.BytesTotal)
+
+		result.Sources = append(result.Sources, asr)
+		result.TotalBytesToTransfer += dryResult.BytesToTransfer
+		result.TotalBytesAll += dryResult.BytesTotal
+		result.TotalFilesToTransfer += dryResult.FilesToTransfer
+	}
+
+	result.HumanTotalTransfer = sync.HumanizeBytes(result.TotalBytesToTransfer)
+	result.HumanTotalAll = sync.HumanizeBytes(result.TotalBytesAll)
+
+	return result, nil
+}
+
 // ExecuteJob runs all backup sources for a job in dependency order.
 // It runs pre-flight checks first, then creates a backup_run record, executes
 // each source, creates snapshot records, and updates the run status.

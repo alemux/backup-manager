@@ -18,15 +18,24 @@ import (
 // It is kept as a simple type to avoid tight coupling to the scheduler.
 type TriggerFunc func(jobID int) (int, error)
 
+// AnalyzeFunc is a function that runs a dry-run analysis for a job and returns estimated sizes.
+type AnalyzeFunc func(jobID int) (interface{}, error)
+
 // JobsHandler handles all /api/jobs and /api/runs routes.
 type JobsHandler struct {
 	db      *database.Database
 	trigger TriggerFunc
+	analyze AnalyzeFunc
 }
 
 // NewJobsHandler constructs a JobsHandler.
 func NewJobsHandler(db *database.Database, trigger TriggerFunc) *JobsHandler {
 	return &JobsHandler{db: db, trigger: trigger}
+}
+
+// SetAnalyzeFunc sets the function used to perform dry-run analysis.
+func (h *JobsHandler) SetAnalyzeFunc(fn AnalyzeFunc) {
+	h.analyze = fn
 }
 
 // --- response types ---
@@ -377,6 +386,36 @@ func (h *JobsHandler) Trigger(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSON(w, http.StatusAccepted, map[string]int{"run_id": runID})
+}
+
+// Analyze handles POST /api/jobs/{id}/analyze
+// Runs rsync --dry-run for each source and returns estimated transfer sizes.
+func (h *JobsHandler) Analyze(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	// Verify job exists
+	var exists int
+	err := h.db.DB().QueryRowContext(r.Context(), "SELECT COUNT(*) FROM backup_jobs WHERE id=?", id).Scan(&exists)
+	if err != nil || exists == 0 {
+		Error(w, http.StatusNotFound, "job not found")
+		return
+	}
+
+	if h.analyze == nil {
+		Error(w, http.StatusInternalServerError, "analyze not configured")
+		return
+	}
+
+	result, err := h.analyze(id)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, fmt.Sprintf("analysis failed: %v", err))
+		return
+	}
+
+	JSON(w, http.StatusOK, result)
 }
 
 // --- ListRuns ---

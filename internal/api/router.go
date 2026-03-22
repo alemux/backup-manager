@@ -23,25 +23,30 @@ type WSHub interface {
 // that don't exercise it).
 // notificationManager is optional; pass nil to disable notification endpoints.
 func NewRouter(db *database.Database, authSvc *auth.Service, triggerFn ...TriggerFunc) http.Handler {
-	return newRouterInternal(db, authSvc, nil, nil, triggerFn...)
+	return newRouterInternal(db, authSvc, nil, nil, nil, triggerFn...)
 }
 
 // NewRouterWithNotifications builds and returns the main HTTP router with a notification manager.
 func NewRouterWithNotifications(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, triggerFn ...TriggerFunc) http.Handler {
-	return newRouterInternal(db, authSvc, mgr, nil, triggerFn...)
+	return newRouterInternal(db, authSvc, mgr, nil, nil, triggerFn...)
 }
 
 // NewRouterWithWebSocket builds and returns the main HTTP router with WebSocket support.
 func NewRouterWithWebSocket(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, hub WSHub, triggerFn ...TriggerFunc) http.Handler {
-	return newRouterInternal(db, authSvc, mgr, hub, triggerFn...)
+	return newRouterInternal(db, authSvc, mgr, hub, nil, triggerFn...)
+}
+
+// NewRouterWithAnalyze builds the main HTTP router with WebSocket support and analyze function.
+func NewRouterWithAnalyze(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, hub WSHub, analyzeFn AnalyzeFunc, triggerFn ...TriggerFunc) http.Handler {
+	return newRouterInternal(db, authSvc, mgr, hub, analyzeFn, triggerFn...)
 }
 
 // newRouterWithNotifications is kept as an internal alias for backward compatibility.
 func newRouterWithNotifications(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, triggerFn ...TriggerFunc) http.Handler {
-	return newRouterInternal(db, authSvc, mgr, nil, triggerFn...)
+	return newRouterInternal(db, authSvc, mgr, nil, nil, triggerFn...)
 }
 
-func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, hub WSHub, triggerFn ...TriggerFunc) http.Handler {
+func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notification.Manager, hub WSHub, analyzeFn AnalyzeFunc, triggerFn ...TriggerFunc) http.Handler {
 	mux := http.NewServeMux()
 	rateLimiter := NewRateLimiter(db)
 	authHandler := NewAuthHandler(db, authSvc)
@@ -57,6 +62,9 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 		trigger = triggerFn[0]
 	}
 	jobsHandler := NewJobsHandler(db, trigger)
+	if analyzeFn != nil {
+		jobsHandler.SetAnalyzeFunc(analyzeFn)
+	}
 	dashboardHandler := NewDashboardHandler(db)
 	snapshotsHandler := NewSnapshotsHandler(db)
 	integritySvc := integrity.NewIntegrityService(db)
@@ -109,6 +117,7 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	protected.HandleFunc("PUT /api/jobs/{id}", jobsHandler.Update)
 	protected.HandleFunc("DELETE /api/jobs/{id}", jobsHandler.Delete)
 	protected.HandleFunc("POST /api/jobs/{id}/trigger", jobsHandler.Trigger)
+	protected.HandleFunc("POST /api/jobs/{id}/analyze", jobsHandler.Analyze)
 	protected.HandleFunc("GET /api/runs", jobsHandler.ListRuns)
 	protected.HandleFunc("GET /api/runs/{id}/logs", jobsHandler.GetRunLogs)
 

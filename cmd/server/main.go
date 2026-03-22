@@ -207,8 +207,15 @@ func main() {
 		return runID, nil
 	}
 
-	// 8b. Create API router with WebSocket support, notifications, and trigger function
-	apiRouter := api.NewRouterWithWebSocket(db, authSvc, notifMgr, hub, triggerFn)
+	// 8b. Create analyze function for dry-run analysis
+	analyzeFn := func(jobID int) (interface{}, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		return orchestrator.AnalyzeJob(ctx, jobID)
+	}
+
+	// 8c. Create API router with WebSocket support, notifications, trigger and analyze functions
+	apiRouter := api.NewRouterWithAnalyze(db, authSvc, notifMgr, hub, analyzeFn, triggerFn)
 
 	// 9. Wrap with RefreshMiddleware
 	apiRouter = authSvc.RefreshMiddleware(apiRouter)
