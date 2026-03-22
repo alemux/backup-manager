@@ -155,3 +155,95 @@
 [18687940ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
 [18691944ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
 [18696181ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[19433747ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19435750ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19439753ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19443737ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[19444741ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[19446743ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[19447755ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19450745ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[19458701ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19459704ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19461707ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19463757ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19465711ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19493761ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19495715ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19496717ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19498720ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19502723ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19523763ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19532726ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19533729ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19535732ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19539735ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19553766ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19569738ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19570741ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19572743ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19576746ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19583769ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19606750ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19607753ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19609756ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19613759ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19613772ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19643762ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19643774ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19644766ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19646770ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19650773ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19673779ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19680776ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19681779ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19683783ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19687785ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19703781ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19717789ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19718792ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19720795ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19724798ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19733784ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19754803ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19755807ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19757813ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19761819ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19763788ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19791824ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19792829ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19793792ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19794835ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19798841ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19823797ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19828844ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19829849ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19831855ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19835859ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19853801ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19865864ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19866870ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19868876ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19872880ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19883804ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19902886ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19903892ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19905896ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19909901ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19913810ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19939907ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19940911ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19942915ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19943813ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19946920ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19973817ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[19976923ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19977926ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19979930ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[19983933ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[20003820ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
+[20013937ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[20014940ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[20016943ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[20020945ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[20033822ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/status' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-C4HPN5Ft.js:463
