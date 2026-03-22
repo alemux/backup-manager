@@ -175,9 +175,13 @@ func main() {
 		db.DB().QueryRow("SELECT bj.name, s.name FROM backup_jobs bj JOIN servers s ON s.id=bj.server_id WHERE bj.id=?", jobID).Scan(&jobName, &serverName)
 
 		go func() {
+			// Small delay to allow WebSocket client to connect before first message
+			time.Sleep(100 * time.Millisecond)
+
 			broadcastLog("info", fmt.Sprintf("Starting backup job: %s on %s", jobName, serverName))
 
 			// --- Phase 1: Auto-analysis ---
+			broadcastLog("info", "═══════════════ ANALYSIS ═══════════════")
 			broadcastLog("info", "Analyzing backup sources...")
 			analysisCtx, analysisCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			analysis, analysisErr := orchestrator.AnalyzeJob(analysisCtx, jobID)
@@ -199,12 +203,16 @@ func main() {
 					hub.Broadcast(ws.Message{
 						Type: ws.MessageProgress,
 						Data: map[string]interface{}{
-							"job_id":      jobID,
-							"job_name":    jobName,
-							"server_name": serverName,
-							"percent":     100,
-							"status":      "skipped",
-							"message":     "Nothing to backup",
+							"job_id":       jobID,
+							"job_name":     jobName,
+							"server_name":  serverName,
+							"percent":      100,
+							"bytes_done":   0,
+							"bytes_total":  0,
+							"eta_seconds":  0,
+							"current_file": "",
+							"status":       "skipped",
+							"message":      "Nothing to backup",
 						},
 						Timestamp: time.Now(),
 					})
@@ -226,6 +234,7 @@ func main() {
 			}
 
 			// --- Phase 2: Backup with live streaming ---
+			broadcastLog("info", "═══════════════ BACKUP ═══════════════")
 			tracker := bmsync.NewProcessTracker()
 			var lastSeenFile string
 
@@ -315,15 +324,28 @@ func main() {
 			// Stop progress goroutine
 			close(progressStop)
 
+			// Determine final bytes/files for the complete progress message
+			var finalBytes int64
+			var finalFiles int
+			if runErr == nil && runResult != nil {
+				finalBytes = runResult.TotalSize
+				finalFiles = runResult.FilesCopied
+			}
+
 			// Send 100% progress
 			hub.Broadcast(ws.Message{
 				Type: ws.MessageProgress,
 				Data: map[string]interface{}{
-					"job_id":      jobID,
-					"job_name":    jobName,
-					"server_name": serverName,
-					"percent":     100,
-					"status":      "complete",
+					"job_id":       jobID,
+					"job_name":     jobName,
+					"server_name":  serverName,
+					"percent":      100,
+					"bytes_done":   finalBytes,
+					"bytes_total":  finalBytes,
+					"eta_seconds":  0,
+					"current_file": fmt.Sprintf("%d files transferred", finalFiles),
+					"status":       "complete",
+					"message":      fmt.Sprintf("Backup complete: %d files, %s", finalFiles, bmsync.HumanizeBytes(finalBytes)),
 				},
 				Timestamp: time.Now(),
 			})

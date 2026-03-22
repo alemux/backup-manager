@@ -52,8 +52,20 @@ export default function JobsPage() {
     if (msg.type === 'progress') {
       const d = msg.data as BackupProgress | undefined;
       if (d) {
-        setProgress(d);
-        setStopping(false); // reset stopping once new progress arrives
+        const terminalStatus = d.status as string | undefined;
+        if (terminalStatus === 'complete' || terminalStatus === 'skipped') {
+          // Show completion state briefly then clear
+          setProgress(d);
+          setStopping(false);
+          setTimeout(() => {
+            setProgress(null);
+            queryClient.invalidateQueries({ queryKey: ['jobs'] });
+            queryClient.invalidateQueries({ queryKey: ['runs'] });
+          }, 4000);
+        } else {
+          setProgress(d);
+          setStopping(false); // reset stopping once new progress arrives
+        }
       }
     } else if (msg.type === 'log') {
       const raw = (msg.data?.message as string) ?? '';
@@ -170,6 +182,7 @@ export default function JobsPage() {
           progress={progress}
           onStop={handleStop}
           stopping={stopping}
+          onDismiss={() => setProgress(null)}
         />
       )}
 
