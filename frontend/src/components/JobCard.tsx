@@ -5,6 +5,7 @@ import { jobsApi, type Job, type AnalysisResult } from '../api/jobs';
 
 interface JobCardProps {
   job: Job;
+  onRunNow?: () => void;
 }
 
 function formatTimeAgo(dateStr: string): string {
@@ -79,7 +80,7 @@ const sourceTypeIcons: Record<string, React.ReactNode> = {
   database: <HardDrive size={14} className="text-purple-500" />,
 };
 
-export default function JobCard({ job }: JobCardProps) {
+export default function JobCard({ job, onRunNow }: JobCardProps) {
   const queryClient = useQueryClient();
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
@@ -91,6 +92,7 @@ export default function JobCard({ job }: JobCardProps) {
       queryClient.invalidateQueries({ queryKey: ['runs'] });
       setShowAnalysis(false);
       setAnalysisResult(null);
+      onRunNow?.();
     },
   });
 

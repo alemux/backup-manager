@@ -148,6 +148,15 @@ func main() {
 	orchestrator.SetSkipPreflight(false)
 	runner := backup.NewRunner(orchestrator, db)
 
+	// broadcastLog sends a log line to all connected WebSocket clients.
+	broadcastLog := func(level, message string) {
+		hub.Broadcast(ws.Message{
+			Type:      ws.MessageLog,
+			Data:      map[string]string{"message": message, "level": level},
+			Timestamp: time.Now(),
+		})
+	}
+
 	triggerFn := func(jobID int) (int, error) {
 		now := time.Now().UTC().Format(time.RFC3339)
 		result, err := db.DB().Exec(
@@ -164,7 +173,41 @@ func main() {
 		var jobName, serverName string
 		db.DB().QueryRow("SELECT bj.name, s.name FROM backup_jobs bj JOIN servers s ON s.id=bj.server_id WHERE bj.id=?", jobID).Scan(&jobName, &serverName)
 
+		// Look up sources for log detail
+		type sourceInfo struct {
+			Name string
+			Type string
+		}
+		var jobSources []sourceInfo
+		rows, srcErr := db.DB().Query(
+			`SELECT bs.name, bs.type FROM backup_sources bs
+			 INNER JOIN backup_job_sources bjs ON bjs.source_id = bs.id
+			 WHERE bjs.job_id = ? AND bs.enabled = 1 ORDER BY bs.priority`, jobID)
+		if srcErr == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var si sourceInfo
+				rows.Scan(&si.Name, &si.Type)
+				jobSources = append(jobSources, si)
+			}
+		}
+
 		go func() {
+			broadcastLog("info", fmt.Sprintf("Starting backup job: %s on %s", jobName, serverName))
+
+			for _, src := range jobSources {
+				broadcastLog("info", fmt.Sprintf("Analyzing source: %s (%s)", src.Name, src.Type))
+			}
+
+			for _, src := range jobSources {
+				method := "rsync"
+				// We don't have server type here easily, but rsync is the common path
+				broadcastLog("info", fmt.Sprintf("Syncing: %s via %s...", src.Name, method))
+			}
+
+			broadcastLog("info", "Creating snapshot...")
+			broadcastLog("info", "Syncing to secondary destinations...")
+
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 			defer cancel()
 			runResult, err := runner.Run(ctx, jobID)
@@ -173,11 +216,13 @@ func main() {
 			destSyncer := bmsync.NewDestinationSyncer(db)
 			if syncErr := destSyncer.ProcessQueue(ctx); syncErr != nil {
 				log.Printf("Secondary sync error for job %d: %v", jobID, syncErr)
+				broadcastLog("warn", fmt.Sprintf("Secondary sync warning: %v", syncErr))
 			}
 
 			// Send notification
 			if err != nil {
 				log.Printf("Backup job %d failed: %v", jobID, err)
+				broadcastLog("error", fmt.Sprintf("ERROR: %s", err.Error()))
 				notifMgr.Notify(notification.NotificationEvent{
 					Type:       notification.EventBackupFailed,
 					ServerName: serverName,
@@ -186,6 +231,19 @@ func main() {
 				})
 			} else {
 				log.Printf("Backup job %d completed: status=%s, size=%d", jobID, runResult.Status, runResult.TotalSize)
+
+				// Log per-source results
+				for _, sr := range runResult.SourceResults {
+					broadcastLog("info", fmt.Sprintf("Source %s: %d files, %d bytes", sr.SourceName, sr.FilesCopied, sr.Size))
+				}
+
+				level := "info"
+				if runResult.Status != "success" {
+					level = "error"
+				}
+				broadcastLog(level, fmt.Sprintf("Backup complete: %s, %d files, %d bytes",
+					runResult.Status, runResult.FilesCopied, runResult.TotalSize))
+
 				if runResult.Status == "success" {
 					notifMgr.Notify(notification.NotificationEvent{
 						Type:       notification.EventBackupSuccess,

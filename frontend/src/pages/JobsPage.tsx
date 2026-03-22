@@ -1,19 +1,63 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, BriefcaseIcon, Loader2 } from 'lucide-react';
 import { jobsApi, type Job } from '../api/jobs';
 import JobCard from '../components/JobCard';
 import CreateJobModal from '../components/CreateJobModal';
 import RunHistory from '../components/RunHistory';
+import BackupTerminal, { type LogEntry } from '../components/BackupTerminal';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 export default function JobsPage() {
   const [createOpen, setCreateOpen] = useState(false);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [terminalExpanded, setTerminalExpanded] = useState(false);
+  const logIdCounter = useRef(0);
 
   const { data: jobs, isLoading, isError, error } = useQuery<Job[]>({
     queryKey: ['jobs'],
     queryFn: () => jobsApi.list(),
     refetchInterval: 30000,
   });
+
+  const { lastMessage } = useWebSocket('/ws/logs');
+
+  // Process incoming WebSocket messages
+  useEffect(() => {
+    if (!lastMessage) return;
+    const msg = lastMessage as { type?: string; data?: { message?: string; level?: string }; timestamp?: string };
+    if (msg.type !== 'log') return;
+
+    const raw = msg.data?.message ?? '';
+    const rawLevel = msg.data?.level ?? 'info';
+
+    // Infer level from message content too
+    let level: LogEntry['level'] = 'info';
+    if (rawLevel === 'error' || raw.toUpperCase().startsWith('ERROR')) {
+      level = 'error';
+    } else if (rawLevel === 'warn' || raw.toLowerCase().includes('warning')) {
+      level = 'warn';
+    } else if (raw.toLowerCase().includes('complete') && raw.toLowerCase().includes('success')) {
+      level = 'success';
+    } else if (rawLevel === 'success') {
+      level = 'success';
+    }
+
+    const entry: LogEntry = {
+      id: ++logIdCounter.current,
+      timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+      message: raw,
+      level,
+    };
+
+    setLogs((prev) => [...prev, entry]);
+    // Auto-expand terminal when logs arrive
+    setTerminalExpanded(true);
+  }, [lastMessage]);
+
+  const handleRunNow = useCallback(() => {
+    setTerminalExpanded(true);
+  }, []);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -68,10 +112,22 @@ export default function JobsPage() {
 
       {/* Jobs grid */}
       {!isLoading && !isError && jobs && jobs.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
           {jobs.map((job) => (
-            <JobCard key={job.id} job={job} />
+            <JobCard key={job.id} job={job} onRunNow={handleRunNow} />
           ))}
+        </div>
+      )}
+
+      {/* Backup Terminal */}
+      {!isLoading && !isError && (
+        <div className="mb-6">
+          <BackupTerminal
+            logs={logs}
+            onClear={() => setLogs([])}
+            expanded={terminalExpanded}
+            onToggle={() => setTerminalExpanded((v) => !v)}
+          />
         </div>
       )}
 
