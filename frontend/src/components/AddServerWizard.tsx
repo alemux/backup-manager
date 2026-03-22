@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   X,
@@ -13,6 +13,9 @@ import {
   Check,
   Plus,
   Trash2,
+  Folder,
+  File,
+  ArrowUp,
 } from 'lucide-react';
 import { serversApi } from '../api/servers';
 import type { DiscoveryResult, DiscoveredService } from '../types';
@@ -39,6 +42,20 @@ interface SourceEntry {
   name: string;
   type: 'web' | 'database' | 'config';
   source_path: string;
+}
+
+interface FTPEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+}
+
+function humanizeBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
 const defaultConn: ConnectionForm = {
@@ -152,6 +169,15 @@ export default function AddServerWizard({ onClose }: WizardProps) {
     { name: '', type: 'web', source_path: '' },
   ]);
 
+  // FTP browser state
+  const [ftpEntries, setFtpEntries] = useState<FTPEntry[]>([]);
+  const [ftpPath, setFtpPath] = useState('/');
+  const [ftpLoading, setFtpLoading] = useState(false);
+  const [ftpError, setFtpError] = useState('');
+  const [selectedFtpPaths, setSelectedFtpPaths] = useState<Record<string, boolean>>({});
+  const [copyAll, setCopyAll] = useState(false);
+  const ftpBrowsedRef = useRef(false);
+
   const createServer = useMutation({
     mutationFn: async () => {
       if (serverType === 'linux') {
@@ -182,8 +208,31 @@ export default function AddServerWizard({ onClose }: WizardProps) {
           password: winConn.password,
           status: 'unknown',
         } as never);
-        for (const src of manualSources.filter((s) => s.name && s.source_path)) {
-          await serversApi.createSource(server.id, src);
+
+        // Build sources from FTP browser selection or manual entry
+        if (winTestStatus === 'ok' && (copyAll || Object.values(selectedFtpPaths).some(Boolean))) {
+          if (copyAll) {
+            await serversApi.createSource(server.id, {
+              name: 'All FTP Data',
+              type: 'web',
+              source_path: '/',
+            });
+          } else {
+            for (const [path, selected] of Object.entries(selectedFtpPaths)) {
+              if (!selected) continue;
+              const entry = ftpEntries.find((e) => e.path === path);
+              const name = entry?.name || path.split('/').filter(Boolean).pop() || path;
+              await serversApi.createSource(server.id, {
+                name,
+                type: 'web',
+                source_path: path,
+              });
+            }
+          }
+        } else {
+          for (const src of manualSources.filter((s) => s.name && s.source_path)) {
+            await serversApi.createSource(server.id, src);
+          }
         }
       }
     },
@@ -258,6 +307,15 @@ export default function AddServerWizard({ onClose }: WizardProps) {
     return databases && databases.length > 0 && databases.some((db) => selectedSources[`db_${db}`]);
   };
 
+  // Auto-browse FTP when entering Step 3 (Windows Sources step) after successful test
+  useEffect(() => {
+    if (serverType === 'windows' && step === 2 && winTestStatus === 'ok' && !ftpBrowsedRef.current) {
+      ftpBrowsedRef.current = true;
+      browseFTP('/');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverType, step]);
+
   // ── Linux steps ────────────────────────────────────────────────────────────
 
   const LINUX_STEPS = ['Type', 'Connection', 'Discovery', 'Sources', 'MySQL', 'Summary'];
@@ -283,6 +341,33 @@ export default function AddServerWizard({ onClose }: WizardProps) {
     } catch (e: unknown) {
       setStatus('error');
       setMsg(e instanceof Error ? e.message : 'Connection failed');
+    }
+  };
+
+  const browseFTP = async (path: string) => {
+    setFtpLoading(true);
+    setFtpError('');
+    try {
+      const res = await serversApi.browseFTP({
+        host: winConn.host,
+        port: parseInt(winConn.port) || 21,
+        username: winConn.username,
+        password: winConn.password,
+        use_tls: winConn.useTLS ?? false,
+        path,
+      });
+      setFtpPath(res.path);
+      setFtpEntries(res.entries);
+      // Pre-select all directories by default when browsing root
+      if (path === '/') {
+        const sel: Record<string, boolean> = {};
+        res.entries.forEach((e) => { if (e.is_dir) sel[e.path] = true; });
+        setSelectedFtpPaths(sel);
+      }
+    } catch (e: unknown) {
+      setFtpError(e instanceof Error ? e.message : 'Failed to list FTP directory');
+    } finally {
+      setFtpLoading(false);
     }
   };
 
@@ -804,124 +889,353 @@ FLUSH PRIVILEGES;`;
     </div>
   );
 
-  // Windows Step 2: Source Selection
-  const renderWindowsSources = () => (
-    <div>
-      <h2 className="text-lg font-bold text-gray-900 mb-1">Source Selection</h2>
-      <p className="text-sm text-gray-500 mb-5">Add the FTP paths you want to back up.</p>
-      <div className="space-y-3">
-        {manualSources.map((src, i) => (
-          <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-gray-500">Source {i + 1}</span>
-              {manualSources.length > 1 && (
-                <button
-                  onClick={() => setManualSources((prev) => prev.filter((_, j) => j !== i))}
-                  className="text-red-400 hover:text-red-600"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Name</label>
-                <input
-                  className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Website Files"
-                  value={src.name}
-                  onChange={(e) => {
-                    const updated = [...manualSources];
-                    updated[i] = { ...src, name: e.target.value };
-                    setManualSources(updated);
-                  }}
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Type</label>
-                <select
-                  className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={src.type}
-                  onChange={(e) => {
-                    const updated = [...manualSources];
-                    updated[i] = { ...src, type: e.target.value as 'web' | 'database' | 'config' };
-                    setManualSources(updated);
-                  }}
-                >
-                  <option value="web">Web</option>
-                  <option value="database">Database</option>
-                  <option value="config">Config</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">FTP Path</label>
-                <input
-                  className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="/wwwroot"
-                  value={src.source_path}
-                  onChange={(e) => {
-                    const updated = [...manualSources];
-                    updated[i] = { ...src, source_path: e.target.value };
-                    setManualSources(updated);
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-        ))}
-        <button
-          onClick={() =>
-            setManualSources((prev) => [...prev, { name: '', type: 'web', source_path: '' }])
-          }
-          className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
-        >
-          <Plus size={15} /> Add Source
-        </button>
-      </div>
-    </div>
-  );
+  // Windows Step 2: FTP Browser Source Selection
+  const renderWindowsSources = () => {
+    const allSelected = ftpEntries.length > 0 && ftpEntries.every((e) => selectedFtpPaths[e.path]);
+    const someSelected = ftpEntries.some((e) => selectedFtpPaths[e.path]);
+    const selectedCount = Object.values(selectedFtpPaths).filter(Boolean).length;
 
-  // Windows Summary
-  const renderWindowsSummary = () => (
-    <div>
-      <h2 className="text-lg font-bold text-gray-900 mb-1">Review & Save</h2>
-      <p className="text-sm text-gray-500 mb-5">Review your configuration before saving.</p>
-      <div className="space-y-4">
-        <div className="bg-gray-50 rounded-lg p-4 text-sm">
-          <p className="font-semibold mb-2 text-gray-700">Server</p>
-          <div className="grid grid-cols-2 gap-1 text-gray-600">
-            <span>Name:</span><span className="font-medium">{winConn.name}</span>
-            <span>Host:</span><span className="font-mono">{winConn.host}:{winConn.port}</span>
-            <span>User:</span><span className="font-mono">{winConn.username}</span>
+    const toggleSelectAll = () => {
+      if (allSelected) {
+        setSelectedFtpPaths({});
+      } else {
+        const sel: Record<string, boolean> = {};
+        ftpEntries.forEach((e) => { sel[e.path] = true; });
+        setSelectedFtpPaths(sel);
+      }
+    };
+
+    const navigateUp = () => {
+      if (ftpPath === '/') return;
+      const parts = ftpPath.split('/').filter(Boolean);
+      parts.pop();
+      const parent = parts.length === 0 ? '/' : '/' + parts.join('/');
+      browseFTP(parent);
+    };
+
+    const showFTPBrowser = winTestStatus === 'ok';
+
+    return (
+      <div>
+        <h2 className="text-lg font-bold text-gray-900 mb-1">Select what to back up</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          {showFTPBrowser ? 'Browse the FTP server and select files or folders to include in backups.' : 'Add the FTP paths you want to back up.'}
+        </p>
+
+        {showFTPBrowser ? (
+          <div className="space-y-3">
+            {/* Copy Everything option */}
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <input
+                type="checkbox"
+                checked={copyAll}
+                onChange={(e) => setCopyAll(e.target.checked)}
+                className="w-4 h-4 accent-blue-600"
+              />
+              Copy everything (backup all FTP content)
+              <span className="text-xs text-blue-600 font-normal ml-1">— backs up the entire FTP root as one source</span>
+            </label>
+
+            {!copyAll && (
+              <>
+                {/* Path bar + Go up */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 font-medium">Current path:</span>
+                  <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded flex-1 truncate">{ftpPath}</span>
+                  <button
+                    onClick={navigateUp}
+                    disabled={ftpPath === '/' || ftpLoading}
+                    className="flex items-center gap-1 text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-40 transition-colors"
+                  >
+                    <ArrowUp size={12} /> Go up
+                  </button>
+                </div>
+
+                {/* Select All */}
+                {ftpEntries.length > 0 && (
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer border-b border-gray-100 pb-2">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => { if (el) el.indeterminate = !allSelected && someSelected; }}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 accent-blue-600"
+                    />
+                    <span className="font-medium">Select All</span>
+                  </label>
+                )}
+
+                {/* Entry list */}
+                {ftpLoading ? (
+                  <div className="flex items-center gap-2 py-6 justify-center text-gray-500">
+                    <Loader2 size={18} className="animate-spin" /> Loading directory...
+                  </div>
+                ) : ftpError ? (
+                  <div className="flex items-center gap-2 text-red-600 text-sm py-3">
+                    <AlertCircle size={14} /> {ftpError}
+                    <button onClick={() => browseFTP('/')} className="ml-2 text-blue-600 underline text-xs">Retry</button>
+                  </div>
+                ) : ftpEntries.length === 0 ? (
+                  <p className="text-gray-400 text-sm py-4 text-center">Empty directory</p>
+                ) : (
+                  <div className="border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100">
+                    {ftpEntries.map((entry) => (
+                      <div key={entry.path} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={!!selectedFtpPaths[entry.path]}
+                          onChange={() =>
+                            setSelectedFtpPaths((prev) => ({ ...prev, [entry.path]: !prev[entry.path] }))
+                          }
+                          className="w-4 h-4 accent-blue-600 flex-shrink-0"
+                        />
+                        <span className="flex-shrink-0 text-gray-400">
+                          {entry.is_dir ? <Folder size={15} className="text-yellow-500" /> : <File size={15} />}
+                        </span>
+                        <span className="flex-1 text-sm truncate font-medium text-gray-800">{entry.name}</span>
+                        {!entry.is_dir && (
+                          <span className="text-xs text-gray-400 flex-shrink-0">{humanizeBytes(entry.size)}</span>
+                        )}
+                        {entry.is_dir && (
+                          <button
+                            onClick={() => browseFTP(entry.path)}
+                            className="text-xs text-blue-600 hover:text-blue-700 flex-shrink-0 px-2 py-0.5 rounded hover:bg-blue-50 transition-colors"
+                          >
+                            Browse
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Selection summary */}
+                {!ftpLoading && !ftpError && (
+                  <p className="text-xs text-gray-500">
+                    {selectedCount === 0 ? 'No items selected' : `Selected: ${selectedCount} item${selectedCount !== 1 ? 's' : ''}`}
+                  </p>
+                )}
+              </>
+            )}
+
+            {/* Divider + manual fallback */}
+            <details className="mt-2">
+              <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">
+                Or add paths manually
+              </summary>
+              <div className="mt-3 space-y-3">
+                {manualSources.map((src, i) => (
+                  <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-500">Source {i + 1}</span>
+                      {manualSources.length > 1 && (
+                        <button
+                          onClick={() => setManualSources((prev) => prev.filter((_, j) => j !== i))}
+                          className="text-red-400 hover:text-red-600"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Name</label>
+                        <input
+                          className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Website Files"
+                          value={src.name}
+                          onChange={(e) => {
+                            const updated = [...manualSources];
+                            updated[i] = { ...src, name: e.target.value };
+                            setManualSources(updated);
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Type</label>
+                        <select
+                          className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          value={src.type}
+                          onChange={(e) => {
+                            const updated = [...manualSources];
+                            updated[i] = { ...src, type: e.target.value as 'web' | 'database' | 'config' };
+                            setManualSources(updated);
+                          }}
+                        >
+                          <option value="web">Web</option>
+                          <option value="database">Database</option>
+                          <option value="config">Config</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">FTP Path</label>
+                        <input
+                          className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="/wwwroot"
+                          value={src.source_path}
+                          onChange={(e) => {
+                            const updated = [...manualSources];
+                            updated[i] = { ...src, source_path: e.target.value };
+                            setManualSources(updated);
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <button
+                  onClick={() =>
+                    setManualSources((prev) => [...prev, { name: '', type: 'web', source_path: '' }])
+                  }
+                  className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  <Plus size={15} /> Add Source
+                </button>
+              </div>
+            </details>
           </div>
-        </div>
-        <div className="bg-gray-50 rounded-lg p-4 text-sm">
-          <p className="font-semibold mb-2 text-gray-700">
-            Backup Sources ({manualSources.filter((s) => s.name && s.source_path).length})
-          </p>
-          {manualSources.filter((s) => s.name && s.source_path).length === 0 ? (
-            <p className="text-gray-500">No sources configured.</p>
-          ) : (
-            <ul className="space-y-1">
-              {manualSources.filter((s) => s.name && s.source_path).map((s, i) => (
-                <li key={i} className="flex items-center gap-2">
-                  <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-blue-100 text-blue-700">{s.type}</span>
-                  <span>{s.name}</span>
-                  <span className="text-gray-400 font-mono text-xs">{s.source_path}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        {createServer.isError && (
-          <div className="flex items-center gap-2 text-red-600 text-sm">
-            <AlertCircle size={15} />
-            {createServer.error?.message || 'Failed to save server'}
+        ) : (
+          /* No successful connection yet — show manual entry only */
+          <div className="space-y-3">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+              Test the FTP connection in the previous step to browse the server automatically.
+            </div>
+            {manualSources.map((src, i) => (
+              <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500">Source {i + 1}</span>
+                  {manualSources.length > 1 && (
+                    <button
+                      onClick={() => setManualSources((prev) => prev.filter((_, j) => j !== i))}
+                      className="text-red-400 hover:text-red-600"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Name</label>
+                    <input
+                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Website Files"
+                      value={src.name}
+                      onChange={(e) => {
+                        const updated = [...manualSources];
+                        updated[i] = { ...src, name: e.target.value };
+                        setManualSources(updated);
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Type</label>
+                    <select
+                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={src.type}
+                      onChange={(e) => {
+                        const updated = [...manualSources];
+                        updated[i] = { ...src, type: e.target.value as 'web' | 'database' | 'config' };
+                        setManualSources(updated);
+                      }}
+                    >
+                      <option value="web">Web</option>
+                      <option value="database">Database</option>
+                      <option value="config">Config</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">FTP Path</label>
+                    <input
+                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="/wwwroot"
+                      value={src.source_path}
+                      onChange={(e) => {
+                        const updated = [...manualSources];
+                        updated[i] = { ...src, source_path: e.target.value };
+                        setManualSources(updated);
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button
+              onClick={() =>
+                setManualSources((prev) => [...prev, { name: '', type: 'web', source_path: '' }])
+              }
+              className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
+            >
+              <Plus size={15} /> Add Source
+            </button>
           </div>
         )}
       </div>
-    </div>
-  );
+    );
+  };
+
+  // Windows Summary
+  const renderWindowsSummary = () => {
+    const useFTPBrowser = winTestStatus === 'ok' && (copyAll || Object.values(selectedFtpPaths).some(Boolean));
+    const ftpSummaryItems = copyAll
+      ? [{ name: 'All FTP Data', path: '/' }]
+      : Object.entries(selectedFtpPaths)
+          .filter(([, v]) => v)
+          .map(([path]) => {
+            const entry = ftpEntries.find((e) => e.path === path);
+            return { name: entry?.name || path.split('/').filter(Boolean).pop() || path, path };
+          });
+    const manualFiltered = manualSources.filter((s) => s.name && s.source_path);
+    const sourceCount = useFTPBrowser ? ftpSummaryItems.length : manualFiltered.length;
+
+    return (
+      <div>
+        <h2 className="text-lg font-bold text-gray-900 mb-1">Review & Save</h2>
+        <p className="text-sm text-gray-500 mb-5">Review your configuration before saving.</p>
+        <div className="space-y-4">
+          <div className="bg-gray-50 rounded-lg p-4 text-sm">
+            <p className="font-semibold mb-2 text-gray-700">Server</p>
+            <div className="grid grid-cols-2 gap-1 text-gray-600">
+              <span>Name:</span><span className="font-medium">{winConn.name}</span>
+              <span>Host:</span><span className="font-mono">{winConn.host}:{winConn.port}</span>
+              <span>User:</span><span className="font-mono">{winConn.username}</span>
+            </div>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-4 text-sm">
+            <p className="font-semibold mb-2 text-gray-700">Backup Sources ({sourceCount})</p>
+            {sourceCount === 0 ? (
+              <p className="text-gray-500">No sources configured.</p>
+            ) : useFTPBrowser ? (
+              <ul className="space-y-1">
+                {ftpSummaryItems.map((item, i) => (
+                  <li key={i} className="flex items-center gap-2">
+                    <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-blue-100 text-blue-700">web</span>
+                    <span>{item.name}</span>
+                    <span className="text-gray-400 font-mono text-xs">{item.path}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <ul className="space-y-1">
+                {manualFiltered.map((s, i) => (
+                  <li key={i} className="flex items-center gap-2">
+                    <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-blue-100 text-blue-700">{s.type}</span>
+                    <span>{s.name}</span>
+                    <span className="text-gray-400 font-mono text-xs">{s.source_path}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {createServer.isError && (
+            <div className="flex items-center gap-2 text-red-600 text-sm">
+              <AlertCircle size={15} />
+              {createServer.error?.message || 'Failed to save server'}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   // ── Navigation logic ───────────────────────────────────────────────────────
 

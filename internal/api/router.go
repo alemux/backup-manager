@@ -99,6 +99,7 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	protected.HandleFunc("GET /api/servers", serversHandler.List)
 	protected.HandleFunc("POST /api/servers", serversHandler.Create)
 	protected.HandleFunc("POST /api/servers/test-connection", serversHandler.TestConnection)
+	protected.HandleFunc("POST /api/servers/browse-ftp", serversHandler.BrowseFTP)
 	protected.HandleFunc("POST /api/servers/discover-preview", serversHandler.DiscoverPreview)
 	protected.HandleFunc("GET /api/servers/{id}", serversHandler.Get)
 	protected.HandleFunc("PUT /api/servers/{id}", serversHandler.Update)

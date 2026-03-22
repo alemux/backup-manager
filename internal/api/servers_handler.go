@@ -245,6 +245,100 @@ func (h *ServersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// BrowseFTP handles POST /api/servers/browse-ftp
+// Connects to an FTP server and lists the contents of the specified path.
+func (h *ServersHandler) BrowseFTP(w http.ResponseWriter, r *http.Request) {
+	type browseRequest struct {
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+		UseTLS   bool   `json:"use_tls"`
+		Path     string `json:"path"`
+	}
+
+	var req browseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		Error(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Host == "" {
+		Error(w, http.StatusBadRequest, "host is required")
+		return
+	}
+	if req.Path == "" {
+		req.Path = "/"
+	}
+	port := req.Port
+	if port == 0 {
+		port = 21
+	}
+
+	conn := connector.NewFTPConnector(connector.FTPConfig{
+		Host:     req.Host,
+		Port:     port,
+		Username: req.Username,
+		Password: req.Password,
+		Timeout:  15 * time.Second,
+		UseTLS:   req.UseTLS,
+	})
+	if err := conn.Connect(); err != nil {
+		Error(w, http.StatusBadGateway, fmt.Sprintf("FTP connection failed: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	files, err := conn.ListFiles(r.Context(), req.Path)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, fmt.Sprintf("FTP list failed: %v", err))
+		return
+	}
+
+	type ftpEntry struct {
+		Name  string `json:"name"`
+		Path  string `json:"path"`
+		IsDir bool   `json:"is_dir"`
+		Size  int64  `json:"size"`
+	}
+
+	entries := make([]ftpEntry, 0, len(files))
+	for _, f := range files {
+		// Derive the entry name from the path
+		name := f.Path
+		// Strip the leading directory prefix to get just the filename
+		prefix := req.Path
+		if len(prefix) > 0 && prefix[len(prefix)-1] != '/' {
+			prefix += "/"
+		}
+		if len(f.Path) > len(prefix) && f.Path[:len(prefix)] == prefix {
+			name = f.Path[len(prefix):]
+		}
+
+		// Build canonical entry path
+		entryPath := req.Path
+		if len(entryPath) == 0 || entryPath[len(entryPath)-1] != '/' {
+			entryPath += "/"
+		}
+		if entryPath == "/" {
+			entryPath = "/" + name
+		} else {
+			entryPath = entryPath + name
+		}
+
+		entries = append(entries, ftpEntry{
+			Name:  name,
+			Path:  entryPath,
+			IsDir: f.IsDir,
+			Size:  f.Size,
+		})
+	}
+
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"path":    req.Path,
+		"entries": entries,
+	})
+}
+
 // TestConnection handles POST /api/servers/test-connection
 // Tests SSH or FTP connectivity without saving the server.
 func (h *ServersHandler) TestConnection(w http.ResponseWriter, r *http.Request) {

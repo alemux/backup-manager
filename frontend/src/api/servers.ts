@@ -40,6 +40,11 @@ export const serversApi = {
       '/api/servers/discover-preview',
       { method: 'POST', body: JSON.stringify(data) }
     ),
+  browseFTP: (data: { host: string; port: number; username: string; password: string; use_tls?: boolean; path?: string }) =>
+    request<{ path: string; entries: Array<{ name: string; path: string; is_dir: boolean; size: number }> }>(
+      '/api/servers/browse-ftp',
+      { method: 'POST', body: JSON.stringify(data) }
+    ),
   rescan: (id: number) =>
     request<RescanResult>(`/api/servers/${id}/rescan`, { method: 'POST' }),
   getPreviousDiscovery: (id: number) =>
