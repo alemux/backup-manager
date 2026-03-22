@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -173,44 +174,159 @@ func main() {
 		var jobName, serverName string
 		db.DB().QueryRow("SELECT bj.name, s.name FROM backup_jobs bj JOIN servers s ON s.id=bj.server_id WHERE bj.id=?", jobID).Scan(&jobName, &serverName)
 
-		// Look up sources for log detail
-		type sourceInfo struct {
-			Name string
-			Type string
-		}
-		var jobSources []sourceInfo
-		rows, srcErr := db.DB().Query(
-			`SELECT bs.name, bs.type FROM backup_sources bs
-			 INNER JOIN backup_job_sources bjs ON bjs.source_id = bs.id
-			 WHERE bjs.job_id = ? AND bs.enabled = 1 ORDER BY bs.priority`, jobID)
-		if srcErr == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var si sourceInfo
-				rows.Scan(&si.Name, &si.Type)
-				jobSources = append(jobSources, si)
-			}
-		}
-
 		go func() {
 			broadcastLog("info", fmt.Sprintf("Starting backup job: %s on %s", jobName, serverName))
 
-			for _, src := range jobSources {
-				broadcastLog("info", fmt.Sprintf("Analyzing source: %s (%s)", src.Name, src.Type))
+			// --- Phase 1: Auto-analysis ---
+			broadcastLog("info", "Analyzing backup sources...")
+			analysisCtx, analysisCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			analysis, analysisErr := orchestrator.AnalyzeJob(analysisCtx, jobID)
+			analysisCancel()
+
+			var analysisTotal int64
+			if analysisErr != nil {
+				broadcastLog("warn", fmt.Sprintf("Analysis failed: %v (proceeding with backup anyway)", analysisErr))
+			} else {
+				analysisTotal = analysis.TotalBytesToTransfer
+
+				// Check if nothing to transfer
+				if analysis.TotalFilesToTransfer == 0 && analysis.TotalBytesToTransfer == 0 {
+					broadcastLog("info", "Nothing to backup — all files are up to date")
+					// Mark run as success with 0 files
+					db.DB().Exec(
+						`UPDATE backup_runs SET status = 'success', finished_at = datetime('now'),
+						 total_size_bytes = 0, files_copied = 0 WHERE id = ?`, runID)
+					hub.Broadcast(ws.Message{
+						Type: ws.MessageProgress,
+						Data: map[string]interface{}{
+							"job_id":      jobID,
+							"job_name":    jobName,
+							"server_name": serverName,
+							"percent":     100,
+							"status":      "skipped",
+							"message":     "Nothing to backup",
+						},
+						Timestamp: time.Now(),
+					})
+					return
+				}
+
+				broadcastLog("info", fmt.Sprintf("Analysis complete: %d files, %s to transfer",
+					analysis.TotalFilesToTransfer, analysis.HumanTotalTransfer))
+
+				// Log per-source analysis
+				for _, src := range analysis.Sources {
+					if src.Error != "" {
+						broadcastLog("warn", fmt.Sprintf("  %s: %s", src.SourceName, src.Error))
+					} else {
+						broadcastLog("info", fmt.Sprintf("  %s: %d files, %s",
+							src.SourceName, src.FilesToTransfer, src.HumanSize))
+					}
+				}
 			}
 
-			for _, src := range jobSources {
-				method := "rsync"
-				// We don't have server type here easily, but rsync is the common path
-				broadcastLog("info", fmt.Sprintf("Syncing: %s via %s...", src.Name, method))
+			// --- Phase 2: Backup with live streaming ---
+			tracker := bmsync.NewProcessTracker()
+			var lastSeenFile string
+
+			logFunc := func(line string) {
+				// Track current file from rsync/lftp output
+				trimmed := strings.TrimSpace(line)
+				if trimmed != "" && !strings.HasPrefix(trimmed, "Number of") &&
+					!strings.HasPrefix(trimmed, "Total") &&
+					!strings.HasPrefix(trimmed, "sent ") &&
+					!strings.HasPrefix(trimmed, "total size") {
+					lastSeenFile = trimmed
+				}
+				broadcastLog("output", line)
 			}
 
-			broadcastLog("info", "Creating snapshot...")
-			broadcastLog("info", "Syncing to secondary destinations...")
+			// Start progress goroutine if we have analysis data
+			progressStop := make(chan struct{})
+			if analysisTotal > 0 {
+				go func() {
+					startTime := time.Now()
+					ticker := time.NewTicker(10 * time.Second)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ticker.C:
+							// Get current destination size using du
+							var currentSize int64
+							var destPath string
+							db.DB().QueryRow(
+								"SELECT path FROM destinations WHERE is_primary = 1 AND enabled = 1 LIMIT 1",
+							).Scan(&destPath)
+							if destPath == "" {
+								destPath = "/var/backups/backupmanager"
+							}
+							serverDir := fmt.Sprintf("%s/%s", destPath, serverName)
+
+							duCmd := exec.Command("du", "-s", serverDir)
+							if duOut, duErr := duCmd.Output(); duErr == nil {
+								fields := strings.Fields(string(duOut))
+								if len(fields) >= 1 {
+									if kb, parseErr := fmt.Sscanf(fields[0], "%d", &currentSize); parseErr == nil && kb > 0 {
+										currentSize = currentSize * 1024 // du reports in KB
+									}
+								}
+							}
+
+							var percent float64
+							if analysisTotal > 0 {
+								percent = float64(currentSize) / float64(analysisTotal) * 100
+								if percent > 100 {
+									percent = 99 // cap at 99% until complete
+								}
+							}
+
+							// Calculate ETA
+							elapsed := time.Since(startTime).Seconds()
+							var etaSeconds float64
+							if percent > 0 && elapsed > 0 {
+								etaSeconds = elapsed / percent * (100 - percent)
+							}
+
+							hub.Broadcast(ws.Message{
+								Type: ws.MessageProgress,
+								Data: map[string]interface{}{
+									"job_id":       jobID,
+									"job_name":     jobName,
+									"server_name":  serverName,
+									"bytes_done":   currentSize,
+									"bytes_total":  analysisTotal,
+									"percent":      int(percent),
+									"eta_seconds":  int(etaSeconds),
+									"current_file": lastSeenFile,
+								},
+								Timestamp: time.Now(),
+							})
+						case <-progressStop:
+							return
+						}
+					}
+				}()
+			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 			defer cancel()
-			runResult, err := runner.Run(ctx, jobID)
+			runResult, runErr := runner.RunWithOptions(ctx, jobID, logFunc, tracker)
+
+			// Stop progress goroutine
+			close(progressStop)
+
+			// Send 100% progress
+			hub.Broadcast(ws.Message{
+				Type: ws.MessageProgress,
+				Data: map[string]interface{}{
+					"job_id":      jobID,
+					"job_name":    jobName,
+					"server_name": serverName,
+					"percent":     100,
+					"status":      "complete",
+				},
+				Timestamp: time.Now(),
+			})
 
 			// Process secondary destination sync queue
 			destSyncer := bmsync.NewDestinationSyncer(db)
@@ -220,36 +336,37 @@ func main() {
 			}
 
 			// Send notification
-			if err != nil {
-				log.Printf("Backup job %d failed: %v", jobID, err)
-				broadcastLog("error", fmt.Sprintf("ERROR: %s", err.Error()))
+			if runErr != nil {
+				log.Printf("Backup job %d failed: %v", jobID, runErr)
+				broadcastLog("error", fmt.Sprintf("ERROR: %s", runErr.Error()))
 				notifMgr.Notify(notification.NotificationEvent{
 					Type:       notification.EventBackupFailed,
 					ServerName: serverName,
 					Title:      "Backup Failed: " + jobName,
-					Message:    err.Error(),
+					Message:    runErr.Error(),
 				})
 			} else {
 				log.Printf("Backup job %d completed: status=%s, size=%d", jobID, runResult.Status, runResult.TotalSize)
 
 				// Log per-source results
 				for _, sr := range runResult.SourceResults {
-					broadcastLog("info", fmt.Sprintf("Source %s: %d files, %d bytes", sr.SourceName, sr.FilesCopied, sr.Size))
+					broadcastLog("info", fmt.Sprintf("Source %s: %d files, %s",
+						sr.SourceName, sr.FilesCopied, bmsync.HumanizeBytes(sr.Size)))
 				}
 
 				level := "info"
 				if runResult.Status != "success" {
 					level = "error"
 				}
-				broadcastLog(level, fmt.Sprintf("Backup complete: %s, %d files, %d bytes",
-					runResult.Status, runResult.FilesCopied, runResult.TotalSize))
+				broadcastLog(level, fmt.Sprintf("Backup complete: %s, %d files, %s",
+					runResult.Status, runResult.FilesCopied, bmsync.HumanizeBytes(runResult.TotalSize)))
 
 				if runResult.Status == "success" {
 					notifMgr.Notify(notification.NotificationEvent{
 						Type:       notification.EventBackupSuccess,
 						ServerName: serverName,
 						Title:      "Backup OK: " + jobName,
-						Message:    fmt.Sprintf("%d files, %d bytes", runResult.FilesCopied, runResult.TotalSize),
+						Message:    fmt.Sprintf("%d files, %s", runResult.FilesCopied, bmsync.HumanizeBytes(runResult.TotalSize)),
 					})
 				} else {
 					notifMgr.Notify(notification.NotificationEvent{
@@ -272,8 +389,13 @@ func main() {
 		return orchestrator.AnalyzeJob(ctx, jobID)
 	}
 
-	// 8c. Create API router with WebSocket support, notifications, trigger and analyze functions
-	apiRouter := api.NewRouterWithAnalyze(db, authSvc, notifMgr, hub, analyzeFn, triggerFn)
+	// 8b2. Create stop function
+	stopFn := func(jobID int) error {
+		return orchestrator.StopJob(jobID)
+	}
+
+	// 8c. Create API router with WebSocket support, notifications, trigger, analyze, and stop functions
+	apiRouter := api.NewRouterFull(db, authSvc, notifMgr, hub, analyzeFn, stopFn, triggerFn)
 
 	// 9. Wrap with RefreshMiddleware
 	apiRouter = authSvc.RefreshMiddleware(apiRouter)

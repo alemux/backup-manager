@@ -46,6 +46,8 @@ func (f *FTPSyncer) Sync(ctx context.Context, source SyncSource, destPath string
 }
 
 // syncWithLFTP uses the `lftp mirror` command for reliable FTP/FTPS sync.
+// If opts.LogFunc is set, each line of output is streamed in real time.
+// If opts.Tracker is set, the running command is registered for external stop.
 func (f *FTPSyncer) syncWithLFTP(ctx context.Context, lftpPath string, source SyncSource, destPath string, opts SyncOptions) (*SyncResult, error) {
 	start := time.Now()
 
@@ -65,22 +67,12 @@ func (f *FTPSyncer) syncWithLFTP(ctx context.Context, lftpPath string, source Sy
 	}
 
 	// Build exclude options for lftp mirror
-	// Use --exclude-glob (not --exclude which expects regex)
 	var excludeArgs string
 	for _, pattern := range opts.Exclude {
 		excludeArgs += fmt.Sprintf(" --exclude-glob %s", pattern)
 	}
 
-	// Build lftp mirror command
-	// --verbose shows what's being transferred
-	// --delete removes local files not on remote
-	// --only-newer downloads only newer files (incremental)
-	// mirror --continue: resume interrupted transfers
-	// mirror --delete: remove local files not on remote
-	// mirror --verbose: show what's happening
-	// mirror --use-pget-n=3: use 3 parallel connections per file for speed
-	// Do NOT use --only-newer: it skips files with matching timestamps even if size differs
-	// Quote paths to handle spaces and special characters (e.g., "FTP Root (Copy All)")
+	// Quote paths to handle spaces and special characters
 	mirrorCmd := fmt.Sprintf(
 		`set ssl:verify-certificate no; set ftp:ssl-force true; set ftp:ssl-protect-data true; set ftp:ssl-protect-list true; set net:max-retries 3; mirror --delete --verbose%s "%s" "%s"; quit`,
 		excludeArgs, remotePath, destPath,
@@ -92,6 +84,17 @@ func (f *FTPSyncer) syncWithLFTP(ctx context.Context, lftpPath string, source Sy
 		"-e", mirrorCmd,
 		source.Host,
 	)
+
+	// Register the command with the process tracker.
+	if opts.Tracker != nil {
+		opts.Tracker.Set(cmd)
+		defer opts.Tracker.Clear()
+	}
+
+	// If LogFunc is set, stream output line by line.
+	if opts.LogFunc != nil {
+		return f.lftpWithStreaming(ctx, cmd, opts.LogFunc, source, port, remotePath, destPath, start)
+	}
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -121,8 +124,52 @@ func (f *FTPSyncer) syncWithLFTP(ctx context.Context, lftpPath string, source Sy
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		// lftp may exit non-zero for minor issues but still transfer files
 		result.Errors = append(result.Errors, fmt.Sprintf("lftp mirror warning: %v", err))
+	}
+
+	return result, nil
+}
+
+// lftpWithStreaming runs lftp with piped output, streaming each line to logFn.
+func (f *FTPSyncer) lftpWithStreaming(ctx context.Context, cmd *exec.Cmd, logFn func(string), source SyncSource, port int, remotePath, destPath string, start time.Time) (*SyncResult, error) {
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start lftp: %w", err)
+	}
+
+	log.Printf("[FTP SYNC] lftp mirror command: %s@%s:%d %s -> %s", source.Username, source.Host, port, remotePath, destPath)
+
+	// Read stdout and stderr together.
+	merged := io.MultiReader(stdoutPipe, stderrPipe)
+	var accumulated bytes.Buffer
+	scanner := bufio.NewScanner(merged)
+	for scanner.Scan() {
+		line := scanner.Text()
+		accumulated.WriteString(line)
+		accumulated.WriteString("\n")
+		logFn(line)
+	}
+
+	waitErr := cmd.Wait()
+	duration := time.Since(start)
+	output := accumulated.String()
+
+	result := parseLFTPMirrorOutput(output)
+	result.Duration = duration
+
+	if waitErr != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		result.Errors = append(result.Errors, fmt.Sprintf("lftp mirror warning: %v", waitErr))
 	}
 
 	return result, nil

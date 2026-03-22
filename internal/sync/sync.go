@@ -48,10 +48,12 @@ func HumanizeBytes(b int64) string {
 
 // SyncOptions configures sync behavior.
 type SyncOptions struct {
-	BandwidthLimitKBps int      // rsync --bwlimit in KB/s, 0 = unlimited
-	Exclude            []string // paths to exclude
-	DryRun             bool     // don't actually copy, just report
-	Delete             bool     // delete files on dest that don't exist on source
+	BandwidthLimitKBps int              // rsync --bwlimit in KB/s, 0 = unlimited
+	Exclude            []string         // paths to exclude
+	DryRun             bool             // don't actually copy, just report
+	Delete             bool             // delete files on dest that don't exist on source
+	LogFunc            func(line string) // called for each line of rsync/lftp output (live streaming)
+	Tracker            *ProcessTracker  // allows external code to stop the running process
 }
 
 // Syncer defines the interface for syncing files from remote to local.

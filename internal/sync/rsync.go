@@ -1,9 +1,11 @@
 package sync
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -68,7 +70,9 @@ func (r *RsyncSyncer) BuildCommand(source SyncSource, destPath string, opts Sync
 }
 
 // Sync executes rsync with the given parameters and returns statistics about
-// what was transferred.
+// what was transferred. If opts.LogFunc is set, each line of output is streamed
+// to it in real time. If opts.Tracker is set, the running command is registered
+// so it can be stopped externally.
 func (r *RsyncSyncer) Sync(ctx context.Context, source SyncSource, destPath string, opts SyncOptions) (*SyncResult, error) {
 	args := r.BuildCommand(source, destPath, opts)
 
@@ -82,53 +86,105 @@ func (r *RsyncSyncer) Sync(ctx context.Context, source SyncSource, destPath stri
 	var cmd *exec.Cmd
 	if source.Password != "" {
 		// Use sshpass to provide the password non-interactively.
-		// sshpass must be installed on the backup machine.
 		if sshpassPath, lookErr := exec.LookPath("sshpass"); lookErr == nil {
 			sshpassArgs := append([]string{"-p", source.Password, "rsync"}, args...)
 			cmd = exec.CommandContext(ctx, sshpassPath, sshpassArgs...)
 		} else {
-			// Fallback: set RSYNC_PASSWORD env var (only works for rsync daemon, not SSH)
-			// For SSH password auth without sshpass, this won't work — log a warning.
 			cmd = exec.CommandContext(ctx, "rsync", args...)
 			cmd.Env = append(os.Environ(), "RSYNC_PASSWORD="+source.Password)
 		}
 	} else {
 		cmd = exec.CommandContext(ctx, "rsync", args...)
 	}
+
+	// Register the command with the process tracker so it can be stopped externally.
+	if opts.Tracker != nil {
+		opts.Tracker.Set(cmd)
+		defer opts.Tracker.Clear()
+	}
+
+	// If LogFunc is set, use pipes to stream output line by line.
+	// Otherwise, fall back to buffered output for backward compatibility.
+	if opts.LogFunc != nil {
+		return r.syncWithStreaming(ctx, cmd, opts.LogFunc, start)
+	}
+
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 
 	err := cmd.Run()
 	duration := time.Since(start)
-
 	output := out.String()
 
-	// rsync exits non-zero for real errors; collect those as error strings
-	// but still try to parse whatever stats we got.
 	result := ParseRsyncStats(output)
 	result.Duration = duration
 
 	if err != nil {
-		// Context cancellation is a hard error.
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-
-		// rsync exit codes:
-		// 0  = success
-		// 23 = partial transfer (some files could not be transferred, e.g. socket files)
-		// 24 = partial transfer (some files vanished during transfer)
-		// These are acceptable — the important files were copied.
 		exitCode := 0
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		}
 		if exitCode == 23 || exitCode == 24 {
-			// Partial transfer is OK — log warning but don't fail
 			result.Errors = append(result.Errors, fmt.Sprintf("rsync partial transfer (exit %d): some files skipped", exitCode))
 		} else {
 			return result, fmt.Errorf("rsync failed: %v\nOutput: %s", err, output)
+		}
+	}
+
+	return result, nil
+}
+
+// syncWithStreaming runs rsync and streams stdout/stderr line by line to logFn.
+// It accumulates the full output for final stats parsing.
+func (r *RsyncSyncer) syncWithStreaming(ctx context.Context, cmd *exec.Cmd, logFn func(string), start time.Time) (*SyncResult, error) {
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start rsync: %w", err)
+	}
+
+	// Merge stdout and stderr into a combined reader.
+	merged := io.MultiReader(stdoutPipe, stderrPipe)
+
+	var accumulated bytes.Buffer
+	scanner := bufio.NewScanner(merged)
+	for scanner.Scan() {
+		line := scanner.Text()
+		accumulated.WriteString(line)
+		accumulated.WriteString("\n")
+		logFn(line)
+	}
+
+	waitErr := cmd.Wait()
+	duration := time.Since(start)
+	output := accumulated.String()
+
+	result := ParseRsyncStats(output)
+	result.Duration = duration
+
+	if waitErr != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		exitCode := 0
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+		if exitCode == 23 || exitCode == 24 {
+			result.Errors = append(result.Errors, fmt.Sprintf("rsync partial transfer (exit %d): some files skipped", exitCode))
+		} else {
+			return result, fmt.Errorf("rsync failed: %v\nOutput: %s", waitErr, output)
 		}
 	}
 

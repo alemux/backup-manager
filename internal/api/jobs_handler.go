@@ -21,11 +21,15 @@ type TriggerFunc func(jobID int) (int, error)
 // AnalyzeFunc is a function that runs a dry-run analysis for a job and returns estimated sizes.
 type AnalyzeFunc func(jobID int) (interface{}, error)
 
+// StopFunc is a function that stops a running backup job by ID.
+type StopFunc func(jobID int) error
+
 // JobsHandler handles all /api/jobs and /api/runs routes.
 type JobsHandler struct {
 	db      *database.Database
 	trigger TriggerFunc
 	analyze AnalyzeFunc
+	stop    StopFunc
 }
 
 // NewJobsHandler constructs a JobsHandler.
@@ -36,6 +40,11 @@ func NewJobsHandler(db *database.Database, trigger TriggerFunc) *JobsHandler {
 // SetAnalyzeFunc sets the function used to perform dry-run analysis.
 func (h *JobsHandler) SetAnalyzeFunc(fn AnalyzeFunc) {
 	h.analyze = fn
+}
+
+// SetStopFunc sets the function used to stop a running job.
+func (h *JobsHandler) SetStopFunc(fn StopFunc) {
+	h.stop = fn
 }
 
 // --- response types ---
@@ -416,6 +425,27 @@ func (h *JobsHandler) Analyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSON(w, http.StatusOK, result)
+}
+
+// Stop handles POST /api/jobs/{id}/stop
+// Stops a running backup job by killing its sync process.
+func (h *JobsHandler) Stop(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	if h.stop == nil {
+		Error(w, http.StatusInternalServerError, "stop not configured")
+		return
+	}
+
+	if err := h.stop(id); err != nil {
+		Error(w, http.StatusBadRequest, fmt.Sprintf("failed to stop job: %v", err))
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
 // --- ListRuns ---

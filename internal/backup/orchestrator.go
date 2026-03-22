@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"github.com/backupmanager/backupmanager/internal/database"
@@ -79,6 +80,12 @@ type Orchestrator struct {
 	backupDir      string // base directory for backup storage
 	skipPreflight  bool   // if true, skip pre-flight checks (for testing)
 	credKey        []byte // AES key for decrypting server credentials
+
+	// Stop capability: track running processes by job ID.
+	trackersMu stdsync.Mutex
+	trackers   map[int]*sync.ProcessTracker // jobID -> tracker
+	cancelsMu  stdsync.Mutex
+	cancels    map[int]context.CancelFunc   // jobID -> cancel function
 }
 
 // NewOrchestrator creates a new Orchestrator with default syncers.
@@ -90,6 +97,8 @@ func NewOrchestrator(db *database.Database) *Orchestrator {
 		mysqlDumper: NewMySQLDumpOrchestrator(),
 		destSyncer:  sync.NewDestinationSyncer(db),
 		backupDir:   "/var/backups/backupmanager",
+		trackers:    make(map[int]*sync.ProcessTracker),
+		cancels:     make(map[int]context.CancelFunc),
 	}
 }
 
@@ -124,6 +133,72 @@ func (o *Orchestrator) loadPrimaryDestPath() string {
 // SetSkipPreflight disables pre-flight checks. Intended for unit tests where
 // the server host is not reachable.
 func (o *Orchestrator) SetSkipPreflight(skip bool) { o.skipPreflight = skip }
+
+// StopJob kills the running process for the given job, if any.
+func (o *Orchestrator) StopJob(jobID int) error {
+	// First cancel the context to prevent further sources from starting.
+	o.cancelsMu.Lock()
+	if cancel, ok := o.cancels[jobID]; ok {
+		cancel()
+	}
+	o.cancelsMu.Unlock()
+
+	// Then kill the currently running sync process.
+	o.trackersMu.Lock()
+	tracker, ok := o.trackers[jobID]
+	o.trackersMu.Unlock()
+	if !ok {
+		return fmt.Errorf("job %d is not running", jobID)
+	}
+	return tracker.Stop()
+}
+
+// IsRunning returns true if the given job has a tracked process.
+func (o *Orchestrator) IsRunning(jobID int) bool {
+	o.trackersMu.Lock()
+	defer o.trackersMu.Unlock()
+	tracker, ok := o.trackers[jobID]
+	return ok && tracker.IsRunning()
+}
+
+// GetRunningJobIDs returns a list of currently running job IDs.
+func (o *Orchestrator) GetRunningJobIDs() []int {
+	o.trackersMu.Lock()
+	defer o.trackersMu.Unlock()
+	var ids []int
+	for id := range o.trackers {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// registerTracker stores a process tracker for the given job.
+func (o *Orchestrator) registerTracker(jobID int, tracker *sync.ProcessTracker) {
+	o.trackersMu.Lock()
+	defer o.trackersMu.Unlock()
+	o.trackers[jobID] = tracker
+}
+
+// unregisterTracker removes the process tracker for the given job.
+func (o *Orchestrator) unregisterTracker(jobID int) {
+	o.trackersMu.Lock()
+	defer o.trackersMu.Unlock()
+	delete(o.trackers, jobID)
+}
+
+// registerCancel stores a cancel function for the given job.
+func (o *Orchestrator) registerCancel(jobID int, cancel context.CancelFunc) {
+	o.cancelsMu.Lock()
+	defer o.cancelsMu.Unlock()
+	o.cancels[jobID] = cancel
+}
+
+// unregisterCancel removes the cancel function for the given job.
+func (o *Orchestrator) unregisterCancel(jobID int) {
+	o.cancelsMu.Lock()
+	defer o.cancelsMu.Unlock()
+	delete(o.cancels, jobID)
+}
 
 // serverRecord holds server information loaded from the DB.
 type serverRecord struct {
@@ -354,10 +429,31 @@ func (o *Orchestrator) analyzeFTPSource(ctx context.Context, server serverRecord
 	return result, nil
 }
 
+// ExecuteJobWithOptions runs all backup sources for a job, with optional LogFunc
+// for live streaming and a ProcessTracker for stop capability.
+func (o *Orchestrator) ExecuteJobWithOptions(ctx context.Context, jobID int, logFunc func(string), tracker *sync.ProcessTracker) (*RunResult, error) {
+	// Wrap context with cancel for stop capability.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	o.registerCancel(jobID, cancel)
+	defer o.unregisterCancel(jobID)
+
+	if tracker != nil {
+		o.registerTracker(jobID, tracker)
+		defer o.unregisterTracker(jobID)
+	}
+
+	return o.executeJobInternal(ctx, jobID, logFunc, tracker)
+}
+
 // ExecuteJob runs all backup sources for a job in dependency order.
 // It runs pre-flight checks first, then creates a backup_run record, executes
 // each source, creates snapshot records, and updates the run status.
 func (o *Orchestrator) ExecuteJob(ctx context.Context, jobID int) (*RunResult, error) {
+	return o.executeJobInternal(ctx, jobID, nil, nil)
+}
+
+func (o *Orchestrator) executeJobInternal(ctx context.Context, jobID int, logFunc func(string), tracker *sync.ProcessTracker) (*RunResult, error) {
 	start := time.Now()
 
 	// 1. Load job from DB.
@@ -444,7 +540,7 @@ func (o *Orchestrator) ExecuteJob(ctx context.Context, jobID int) (*RunResult, e
 			continue
 		}
 
-		sr := o.executeSource(ctx, src, server, *job, timestamp)
+		sr := o.executeSource(ctx, src, server, *job, timestamp, logFunc, tracker)
 		result.SourceResults = append(result.SourceResults, sr)
 
 		if sr.Status == "success" {
@@ -497,7 +593,7 @@ func (o *Orchestrator) ExecuteJob(ctx context.Context, jobID int) (*RunResult, e
 }
 
 // executeSource runs a single source backup based on its type and the server type.
-func (o *Orchestrator) executeSource(ctx context.Context, src BackupSourceRecord, server serverRecord, job jobRecord, timestamp string) SourceResult {
+func (o *Orchestrator) executeSource(ctx context.Context, src BackupSourceRecord, server serverRecord, job jobRecord, timestamp string, logFunc func(string), tracker *sync.ProcessTracker) SourceResult {
 	sr := SourceResult{
 		SourceID:   src.ID,
 		SourceName: src.Name,
@@ -526,6 +622,8 @@ func (o *Orchestrator) executeSource(ctx context.Context, src BackupSourceRecord
 		opts := sync.SyncOptions{
 			Exclude: excludes,
 			Delete:  true, // remove files locally that were deleted on remote
+			LogFunc: logFunc,
+			Tracker: tracker,
 		}
 		if job.BandwidthLimit != nil {
 			opts.BandwidthLimitKBps = *job.BandwidthLimit * 1024 // convert Mbps to KBps

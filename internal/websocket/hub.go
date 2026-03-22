@@ -30,9 +30,10 @@ const (
 type MessageType string
 
 const (
-	MessageLog    MessageType = "log"
-	MessageStatus MessageType = "status"
-	MessageHealth MessageType = "health"
+	MessageLog      MessageType = "log"
+	MessageStatus   MessageType = "status"
+	MessageHealth   MessageType = "health"
+	MessageProgress MessageType = "progress"
 )
 
 // Message is the JSON envelope sent to all connected clients.
