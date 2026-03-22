@@ -15,7 +15,19 @@ interface BackupTerminalProps {
   onToggle: () => void;
 }
 
-function levelColor(level: LogEntry['level']): string {
+function lineColor(level: LogEntry['level'], message: string): string {
+  // Content-based overrides
+  const lower = message.toLowerCase();
+  if (lower.includes('nothing to backup') || lower.includes('nothing to transfer')) {
+    return 'text-green-400';
+  }
+  if (lower.startsWith('transferring file') || lower.startsWith('sending file') || lower.includes('transferring \'')) {
+    return 'text-cyan-400';
+  }
+  if (lower.startsWith('analyz')) {
+    return 'text-yellow-300';
+  }
+  // Level-based fallback
   switch (level) {
     case 'error':
       return 'text-red-400';
@@ -88,7 +100,7 @@ export default function BackupTerminal({ logs, onClear, expanded, onToggle }: Ba
         <div
           ref={containerRef}
           onScroll={handleScroll}
-          className="h-64 overflow-y-auto p-3 font-mono text-xs leading-5"
+          className="max-h-72 overflow-y-auto p-3 font-mono text-xs leading-5"
           style={{ background: '#0d1117' }}
         >
           {logs.length === 0 ? (
@@ -98,7 +110,7 @@ export default function BackupTerminal({ logs, onClear, expanded, onToggle }: Ba
               {logs.map((entry) => (
                 <div key={entry.id} className="flex gap-2 hover:bg-white/5 px-1 rounded">
                   <span className="text-gray-600 shrink-0 select-none">[{formatTime(entry.timestamp)}]</span>
-                  <span className={levelColor(entry.level)}>{entry.message}</span>
+                  <span className={lineColor(entry.level, entry.message)}>{entry.message}</span>
                 </div>
               ))}
               <div ref={bottomRef} />

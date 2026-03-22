@@ -81,4 +81,5 @@ export const jobsApi = {
     return request<RunsResponse>(`/api/runs${qs}`);
   },
   getRunLogs: (id: number) => request<unknown>(`/api/runs/${id}/logs`),
+  stop: (id: number) => request<{ message: string }>(`/api/jobs/${id}/stop`, { method: 'POST' }),
 };

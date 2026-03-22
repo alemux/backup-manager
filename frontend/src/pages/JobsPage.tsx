@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, BriefcaseIcon, Loader2 } from 'lucide-react';
 import { jobsApi, type Job } from '../api/jobs';
 import JobCard from '../components/JobCard';
 import CreateJobModal from '../components/CreateJobModal';
 import RunHistory from '../components/RunHistory';
 import BackupTerminal, { type LogEntry } from '../components/BackupTerminal';
+import RunningBackup, { type BackupProgress } from '../components/RunningBackup';
 import { useWebSocket } from '../hooks/useWebSocket';
 
 export default function JobsPage() {
+  const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [terminalExpanded, setTerminalExpanded] = useState(false);
+  const [progress, setProgress] = useState<BackupProgress | null>(null);
+  const [stopping, setStopping] = useState(false);
   const logIdCounter = useRef(0);
 
   const { data: jobs, isLoading, isError, error } = useQuery<Job[]>({
@@ -20,44 +24,85 @@ export default function JobsPage() {
     refetchInterval: 30000,
   });
 
-  const { lastMessage } = useWebSocket('/ws/logs');
+  const stopMutation = useMutation({
+    mutationFn: (id: number) => jobsApi.stop(id),
+    onMutate: () => {
+      setStopping(true);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['runs'] });
+    },
+    onError: () => {
+      setStopping(false);
+    },
+  });
+
+  const { lastMessage } = useWebSocket('/ws/status');
 
   // Process incoming WebSocket messages
   useEffect(() => {
     if (!lastMessage) return;
-    const msg = lastMessage as { type?: string; data?: { message?: string; level?: string }; timestamp?: string };
-    if (msg.type !== 'log') return;
-
-    const raw = msg.data?.message ?? '';
-    const rawLevel = msg.data?.level ?? 'info';
-
-    // Infer level from message content too
-    let level: LogEntry['level'] = 'info';
-    if (rawLevel === 'error' || raw.toUpperCase().startsWith('ERROR')) {
-      level = 'error';
-    } else if (rawLevel === 'warn' || raw.toLowerCase().includes('warning')) {
-      level = 'warn';
-    } else if (raw.toLowerCase().includes('complete') && raw.toLowerCase().includes('success')) {
-      level = 'success';
-    } else if (rawLevel === 'success') {
-      level = 'success';
-    }
-
-    const entry: LogEntry = {
-      id: ++logIdCounter.current,
-      timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
-      message: raw,
-      level,
+    const msg = lastMessage as {
+      type?: string;
+      data?: Record<string, unknown>;
+      timestamp?: string;
     };
 
-    setLogs((prev) => [...prev, entry]);
-    // Auto-expand terminal when logs arrive
-    setTerminalExpanded(true);
-  }, [lastMessage]);
+    if (msg.type === 'progress') {
+      const d = msg.data as BackupProgress | undefined;
+      if (d) {
+        setProgress(d);
+        setStopping(false); // reset stopping once new progress arrives
+      }
+    } else if (msg.type === 'log') {
+      const raw = (msg.data?.message as string) ?? '';
+      const rawLevel = (msg.data?.level as string) ?? 'info';
+
+      // Infer level from message content too
+      let level: LogEntry['level'] = 'info';
+      if (rawLevel === 'error' || raw.toUpperCase().startsWith('ERROR')) {
+        level = 'error';
+      } else if (rawLevel === 'warn' || raw.toLowerCase().includes('warning')) {
+        level = 'warn';
+      } else if (raw.toLowerCase().includes('complete') && raw.toLowerCase().includes('success')) {
+        level = 'success';
+      } else if (rawLevel === 'success') {
+        level = 'success';
+      }
+
+      const entry: LogEntry = {
+        id: ++logIdCounter.current,
+        timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+        message: raw,
+        level,
+      };
+
+      setLogs((prev) => [...prev, entry]);
+      // Auto-expand terminal when logs arrive
+      setTerminalExpanded(true);
+    } else if (msg.type === 'status') {
+      // When status changes away from running, clear progress and stopping state
+      const d = msg.data as { status?: string } | undefined;
+      if (d?.status && d.status !== 'running') {
+        setProgress(null);
+        setStopping(false);
+        queryClient.invalidateQueries({ queryKey: ['jobs'] });
+        queryClient.invalidateQueries({ queryKey: ['runs'] });
+      }
+    }
+  }, [lastMessage, queryClient]);
 
   const handleRunNow = useCallback(() => {
     setTerminalExpanded(true);
   }, []);
+
+  const handleStop = useCallback(
+    (jobId: number) => {
+      stopMutation.mutate(jobId);
+    },
+    [stopMutation],
+  );
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -117,6 +162,15 @@ export default function JobsPage() {
             <JobCard key={job.id} job={job} onRunNow={handleRunNow} />
           ))}
         </div>
+      )}
+
+      {/* Running Backup progress card */}
+      {!isLoading && !isError && (
+        <RunningBackup
+          progress={progress}
+          onStop={handleStop}
+          stopping={stopping}
+        />
       )}
 
       {/* Backup Terminal */}
