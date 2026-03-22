@@ -1,21 +1,28 @@
 package connector
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jlaffaye/ftp"
 )
 
 // FTPConnector implements the Connector interface using plain FTP.
+// Falls back to the `lftp` command-line tool for FTPS servers that
+// require TLS session reuse (not supported by the Go FTP library).
 type FTPConnector struct {
-	config FTPConfig
-	conn   *ftp.ServerConn
+	config  FTPConfig
+	conn    *ftp.ServerConn
+	useLFTP bool // true when Go library failed and lftp is used as fallback
 }
 
 // NewFTPConnector creates a new FTPConnector with the given configuration.
@@ -40,33 +47,50 @@ func (c *FTPConnector) Connect() error {
 
 	if c.config.UseTLS {
 		tlsConfig := &tls.Config{
-			InsecureSkipVerify: true, // many FTP servers use self-signed certs
+			InsecureSkipVerify: true,
+			ClientSessionCache: tls.NewLRUClientSessionCache(32),
 		}
 		opts = append(opts, ftp.DialWithExplicitTLS(tlsConfig))
 	}
 
 	conn, err := ftp.Dial(addr, opts...)
 	if err != nil {
-		// If plain FTP fails and TLS wasn't requested, retry with TLS
-		// (server might require it)
 		if !c.config.UseTLS {
-			tlsConfig := &tls.Config{InsecureSkipVerify: true}
+			tlsConfig := &tls.Config{
+				InsecureSkipVerify: true,
+				ClientSessionCache: tls.NewLRUClientSessionCache(32),
+			}
 			opts2 := []ftp.DialOption{
 				ftp.DialWithTimeout(c.config.Timeout),
 				ftp.DialWithExplicitTLS(tlsConfig),
 			}
 			conn2, err2 := ftp.Dial(addr, opts2...)
 			if err2 != nil {
+				// Go FTP library failed — check if lftp is available as fallback
+				if _, lftpErr := exec.LookPath("lftp"); lftpErr == nil {
+					c.useLFTP = true
+					return nil // Will use lftp for all operations
+				}
 				return fmt.Errorf("ftp dial %s: %w (also tried TLS: %v)", addr, err, err2)
 			}
 			conn = conn2
 		} else {
+			// FTPS dial failed — check if lftp is available as fallback
+			if _, lftpErr := exec.LookPath("lftp"); lftpErr == nil {
+				c.useLFTP = true
+				return nil // Will use lftp for all operations
+			}
 			return fmt.Errorf("ftps dial %s: %w", addr, err)
 		}
 	}
 
 	if err := conn.Login(c.config.Username, c.config.Password); err != nil {
-		conn.Quit() //nolint:errcheck // best-effort cleanup
+		conn.Quit() //nolint:errcheck
+		// Login failed — try lftp
+		if _, lftpErr := exec.LookPath("lftp"); lftpErr == nil {
+			c.useLFTP = true
+			return nil
+		}
 		return fmt.Errorf("ftp login %s: %w", addr, err)
 	}
 
@@ -151,7 +175,8 @@ func (c *FTPConnector) UploadFile(ctx context.Context, localPath, remotePath str
 // ModTime may be zero if the FTP server does not report modification times.
 func (c *FTPConnector) ListFiles(ctx context.Context, remotePath string) ([]FileInfo, error) {
 	if c.conn == nil {
-		return nil, fmt.Errorf("not connected")
+		// If not connected via Go library, try lftp fallback
+		return c.listFilesLFTP(ctx, remotePath)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -160,6 +185,12 @@ func (c *FTPConnector) ListFiles(ctx context.Context, remotePath string) ([]File
 
 	entries, err := c.conn.List(remotePath)
 	if err != nil {
+		// TLS session reuse issue — try lftp as fallback
+		if c.config.UseTLS {
+			if files, lftpErr := c.listFilesLFTP(ctx, remotePath); lftpErr == nil {
+				return files, nil
+			}
+		}
 		return nil, fmt.Errorf("ftp list %q: %w", remotePath, err)
 	}
 
@@ -170,6 +201,107 @@ func (c *FTPConnector) ListFiles(ctx context.Context, remotePath string) ([]File
 			Size:    int64(e.Size),
 			ModTime: e.Time, // may be zero value if server doesn't provide it
 			IsDir:   e.Type == ftp.EntryTypeFolder,
+		})
+	}
+	return files, nil
+}
+
+// listFilesLFTP uses the `lftp` command-line tool as a fallback for FTPS
+// servers that require TLS session reuse (not supported by the Go FTP library).
+func (c *FTPConnector) listFilesLFTP(ctx context.Context, remotePath string) ([]FileInfo, error) {
+	lftpPath, err := exec.LookPath("lftp")
+	if err != nil {
+		return nil, fmt.Errorf("lftp not installed (needed for FTPS): %w", err)
+	}
+
+	// Build lftp command — use `ls` for standard long-listing format
+	lftpCmd := fmt.Sprintf(
+		"set ssl:verify-certificate no; set ftp:ssl-force true; set ftp:ssl-protect-data true; set ftp:ssl-protect-list true; ls %s; quit",
+		remotePath,
+	)
+	port := c.config.Port
+	if port == 0 {
+		port = 21
+	}
+
+	cmd := exec.CommandContext(ctx, lftpPath,
+		"-u", c.config.Username+","+c.config.Password,
+		"-p", strconv.Itoa(port),
+		"-e", lftpCmd,
+		c.config.Host,
+	)
+	var out strings.Builder
+	var errOut strings.Builder
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("lftp failed: %v: %s", err, errOut.String())
+	}
+
+	output := out.String()
+	if output == "" {
+		// Empty listing — could be an empty directory or wrong path
+		return []FileInfo{}, nil
+	}
+
+	// Parse `ls -l` output from lftp
+	// Common formats:
+	//   drwxr-xr-x  2 user group  4096 Mar 20 12:00 dirname
+	//   -rw-r--r--  1 user group  1234 Mar 20 12:00 filename
+	//   drwxr-xr-x  2 user group  4096 2026-03-20 12:00 dirname
+	var files []FileInfo
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "total") {
+			continue
+		}
+
+		// Must start with permission string (d, -, l, etc.)
+		if len(trimmed) < 10 {
+			continue
+		}
+		firstChar := trimmed[0]
+		if firstChar != 'd' && firstChar != '-' && firstChar != 'l' {
+			continue
+		}
+
+		isDir := firstChar == 'd'
+		fields := strings.Fields(trimmed)
+
+		// Find the filename: everything after the 8th field for standard ls,
+		// or after the date/time fields. The safest approach: find name after
+		// the time pattern (HH:MM or YYYY)
+		name := ""
+		size := int64(0)
+
+		if len(fields) >= 9 {
+			name = strings.Join(fields[8:], " ")
+			if s, err := strconv.ParseInt(fields[4], 10, 64); err == nil {
+				size = s
+			}
+		} else if len(fields) >= 4 {
+			// Minimal format: permissions size date name
+			name = fields[len(fields)-1]
+		}
+
+		if name == "" || name == "." || name == ".." {
+			continue
+		}
+
+		entryPath := remotePath
+		if entryPath == "/" || entryPath == "" {
+			entryPath = "/" + name
+		} else {
+			entryPath = strings.TrimRight(entryPath, "/") + "/" + name
+		}
+
+		files = append(files, FileInfo{
+			Path:  entryPath,
+			Size:  size,
+			IsDir: isDir,
 		})
 	}
 	return files, nil

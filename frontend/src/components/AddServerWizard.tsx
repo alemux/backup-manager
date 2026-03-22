@@ -206,6 +206,7 @@ export default function AddServerWizard({ onClose }: WizardProps) {
           connection_type: 'ftp',
           username: winConn.username,
           password: winConn.password,
+          use_tls: winConn.useTLS ?? false,
           status: 'unknown',
         } as never);
 

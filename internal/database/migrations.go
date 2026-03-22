@@ -17,6 +17,9 @@ func (d *Database) Migrate() error {
 	if err := d.runMigration("migrations/002_add_exclude_patterns.sql", 2); err != nil {
 		return err
 	}
+	if err := d.runMigration("migrations/003_add_use_tls.sql", 3); err != nil {
+		return err
+	}
 	return nil
 }
 

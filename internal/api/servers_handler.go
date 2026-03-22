@@ -28,6 +28,7 @@ type Server struct {
 	Port           int       `json:"port"`
 	ConnectionType string    `json:"connection_type"`
 	Username       string    `json:"username"`
+	UseTLS         bool      `json:"use_tls"`
 	Status         string    `json:"status"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -43,6 +44,7 @@ type serverRequest struct {
 	Username       string `json:"username"`
 	Password       string `json:"password"`
 	SSHKeyPath     string `json:"ssh_key_path"`
+	UseTLS         bool   `json:"use_tls"`
 }
 
 // ServersHandler handles all /api/servers routes.
@@ -75,7 +77,7 @@ func (h *ServersHandler) SetNotifyManager(mgr *notification.Manager) {
 // List handles GET /api/servers
 func (h *ServersHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.DB().QueryContext(r.Context(),
-		`SELECT id, name, type, host, port, connection_type, COALESCE(username,''), status, created_at, updated_at
+		`SELECT id, name, type, host, port, connection_type, COALESCE(username,''), COALESCE(use_tls,0), status, created_at, updated_at
 		 FROM servers ORDER BY id ASC`)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "failed to query servers")
@@ -87,10 +89,12 @@ func (h *ServersHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var s Server
 		var createdAt, updatedAt string
-		if err := rows.Scan(&s.ID, &s.Name, &s.Type, &s.Host, &s.Port, &s.ConnectionType, &s.Username, &s.Status, &createdAt, &updatedAt); err != nil {
+		var useTLSInt int
+		if err := rows.Scan(&s.ID, &s.Name, &s.Type, &s.Host, &s.Port, &s.ConnectionType, &s.Username, &useTLSInt, &s.Status, &createdAt, &updatedAt); err != nil {
 			Error(w, http.StatusInternalServerError, "failed to scan server")
 			return
 		}
+		s.UseTLS = useTLSInt != 0
 		s.CreatedAt = parseTime(createdAt)
 		s.UpdatedAt = parseTime(updatedAt)
 		servers = append(servers, s)
@@ -127,13 +131,18 @@ func (h *ServersHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	useTLSInt := 0
+	if req.UseTLS {
+		useTLSInt = 1
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := h.db.DB().ExecContext(r.Context(),
-		`INSERT INTO servers (name, type, host, port, connection_type, username, encrypted_password, ssh_key_path, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unknown', ?, ?)`,
+		`INSERT INTO servers (name, type, host, port, connection_type, username, encrypted_password, ssh_key_path, use_tls, status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown', ?, ?)`,
 		req.Name, req.Type, req.Host, req.Port, req.ConnectionType,
 		nullableString(req.Username), nullableString(encPassword), nullableString(encSSHKey),
-		now, now,
+		useTLSInt, now, now,
 	)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "failed to create server")
@@ -195,13 +204,18 @@ func (h *ServersHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	updateTLSInt := 0
+	if req.UseTLS {
+		updateTLSInt = 1
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := h.db.DB().ExecContext(r.Context(),
-		`UPDATE servers SET name=?, type=?, host=?, port=?, connection_type=?, username=?, encrypted_password=?, ssh_key_path=?, updated_at=?
+		`UPDATE servers SET name=?, type=?, host=?, port=?, connection_type=?, username=?, encrypted_password=?, ssh_key_path=?, use_tls=?, updated_at=?
 		 WHERE id=?`,
 		req.Name, req.Type, req.Host, req.Port, req.ConnectionType,
 		nullableString(req.Username), nullableString(encPassword), nullableString(encSSHKey),
-		now, id,
+		updateTLSInt, now, id,
 	)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "failed to update server")
@@ -367,12 +381,13 @@ func (h *ServersHandler) BrowseFTPServer(w http.ResponseWriter, r *http.Request)
 		connectionType string
 		username       string
 		password       sql.NullString
+		useTLS         int
 	}
 	var row serverRow
 	err := h.db.DB().QueryRowContext(r.Context(),
-		`SELECT host, port, connection_type, COALESCE(username,''), encrypted_password
+		`SELECT host, port, connection_type, COALESCE(username,''), encrypted_password, COALESCE(use_tls,0)
 		 FROM servers WHERE id=?`, id,
-	).Scan(&row.host, &row.port, &row.connectionType, &row.username, &row.password)
+	).Scan(&row.host, &row.port, &row.connectionType, &row.username, &row.password, &row.useTLS)
 	if err == sql.ErrNoRows {
 		Error(w, http.StatusNotFound, "server not found")
 		return
@@ -408,6 +423,7 @@ func (h *ServersHandler) BrowseFTPServer(w http.ResponseWriter, r *http.Request)
 		Username: row.username,
 		Password: password,
 		Timeout:  15 * time.Second,
+		UseTLS:   row.useTLS != 0,
 	})
 	if err := conn.Connect(); err != nil {
 		Error(w, http.StatusBadGateway, fmt.Sprintf("FTP connection failed: %v", err))
@@ -950,11 +966,12 @@ func (h *ServersHandler) fetchServer(r *http.Request, id int) (Server, bool) {
 	var s Server
 	var createdAt, updatedAt string
 	var username sql.NullString
+	var useTLSInt int
 
 	err := h.db.DB().QueryRowContext(r.Context(),
-		`SELECT id, name, type, host, port, connection_type, username, status, created_at, updated_at
+		`SELECT id, name, type, host, port, connection_type, username, COALESCE(use_tls,0), status, created_at, updated_at
 		 FROM servers WHERE id=?`, id,
-	).Scan(&s.ID, &s.Name, &s.Type, &s.Host, &s.Port, &s.ConnectionType, &username, &s.Status, &createdAt, &updatedAt)
+	).Scan(&s.ID, &s.Name, &s.Type, &s.Host, &s.Port, &s.ConnectionType, &username, &useTLSInt, &s.Status, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return Server{}, false
 	}
@@ -964,6 +981,7 @@ func (h *ServersHandler) fetchServer(r *http.Request, id int) (Server, bool) {
 	if username.Valid {
 		s.Username = username.String
 	}
+	s.UseTLS = useTLSInt != 0
 	s.CreatedAt = parseTime(createdAt)
 	s.UpdatedAt = parseTime(updatedAt)
 	return s, true

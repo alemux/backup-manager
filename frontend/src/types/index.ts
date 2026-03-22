@@ -14,6 +14,7 @@ export interface Server {
   username?: string;
   password?: string;       // only used on create/update, never returned
   ssh_key_path?: string;   // only used on create/update, never returned
+  use_tls?: boolean;
   status: 'online' | 'offline' | 'warning' | 'unknown';
   created_at: string;
 }
