@@ -120,6 +120,11 @@ func (f *FTPSyncer) syncWithLFTP(ctx context.Context, lftpPath string, source Sy
 	result := parseLFTPMirrorOutput(output)
 	result.Duration = duration
 
+	// If lftp didn't report bytes, measure the destination directory
+	if result.BytesCopied == 0 && result.FilesCopied > 0 {
+		result.BytesCopied = measureDirSize(destPath)
+	}
+
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -165,6 +170,11 @@ func (f *FTPSyncer) lftpWithStreaming(ctx context.Context, cmd *exec.Cmd, logFn 
 	result := parseLFTPMirrorOutput(output)
 	result.Duration = duration
 
+	// If lftp didn't report bytes, measure the destination directory
+	if result.BytesCopied == 0 && result.FilesCopied > 0 {
+		result.BytesCopied = measureDirSize(destPath)
+	}
+
 	if waitErr != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -176,7 +186,6 @@ func (f *FTPSyncer) lftpWithStreaming(ctx context.Context, cmd *exec.Cmd, logFn 
 }
 
 // parseLFTPMirrorOutput parses lftp mirror --verbose output to extract stats.
-// Lines like: "Transferring file `filename'" and "Total: X files, Y bytes"
 func parseLFTPMirrorOutput(output string) *SyncResult {
 	result := &SyncResult{}
 
@@ -188,7 +197,10 @@ func parseLFTPMirrorOutput(output string) *SyncResult {
 		}
 	}
 
-	// Try to parse "Total: N directories, M files, B bytes transferred"
+	// Try to parse lftp summary lines:
+	// "Total: N directories, M files, B bytes transferred"
+	// "New: N files, B bytes"
+	// "Modified: N files"
 	reTotal := regexp.MustCompile(`(\d+)\s+files?.*?(\d[\d,]*)\s+bytes?\s+transferred`)
 	if m := reTotal.FindStringSubmatch(output); m != nil {
 		if n, err := strconv.Atoi(m[1]); err == nil {
@@ -201,6 +213,35 @@ func parseLFTPMirrorOutput(output string) *SyncResult {
 	}
 
 	return result
+}
+
+// measureDirSize returns the total size of a directory in bytes using du.
+func measureDirSize(path string) int64 {
+	// Try du -sb (Linux) first, fall back to du -sk (macOS)
+	cmd := exec.Command("du", "-sb", path)
+	out, err := cmd.Output()
+	if err != nil {
+		// macOS doesn't have -b, use -sk (kilobytes)
+		cmd2 := exec.Command("du", "-sk", path)
+		out2, err2 := cmd2.Output()
+		if err2 != nil {
+			return 0
+		}
+		fields := strings.Fields(string(out2))
+		if len(fields) >= 1 {
+			if kb, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
+				return kb * 1024
+			}
+		}
+		return 0
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) >= 1 {
+		if b, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
+			return b
+		}
+	}
+	return 0
 }
 
 // syncWithGoLib is the fallback using the Go FTP library (for plain FTP).
