@@ -1,13 +1,19 @@
 package sync
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/backupmanager/backupmanager/internal/connector"
@@ -15,8 +21,7 @@ import (
 )
 
 // FTPSyncer implements Syncer using an FTP connection for incremental backups.
-// It maintains a manifest file alongside the downloaded files to detect
-// changes between runs without re-hashing files whose mtime and size are stable.
+// For FTPS servers, uses `lftp mirror` which handles TLS session reuse correctly.
 type FTPSyncer struct{}
 
 // NewFTPSyncer creates a new FTPSyncer.
@@ -26,14 +31,115 @@ func NewFTPSyncer() *FTPSyncer { return &FTPSyncer{} }
 // directory.
 const manifestFileName = ".backup_manifest.json"
 
-// Sync connects to the FTP server described by source, lists all remote files
-// recursively, compares them to the local manifest, downloads new/modified
-// files and updates the manifest.
+// Sync connects to the FTP server and mirrors files to destPath.
+// Uses lftp mirror as primary method (handles FTPS correctly).
+// Falls back to Go FTP library for plain FTP.
 func (f *FTPSyncer) Sync(ctx context.Context, source SyncSource, destPath string, opts SyncOptions) (*SyncResult, error) {
+	// Try lftp first — it handles FTPS correctly
+	if lftpPath, err := exec.LookPath("lftp"); err == nil {
+		return f.syncWithLFTP(ctx, lftpPath, source, destPath, opts)
+	}
+
+	// Fallback: use Go FTP library (may fail with FTPS TLS session reuse)
+	return f.syncWithGoLib(ctx, source, destPath, opts)
+}
+
+// syncWithLFTP uses the `lftp mirror` command for reliable FTP/FTPS sync.
+func (f *FTPSyncer) syncWithLFTP(ctx context.Context, lftpPath string, source SyncSource, destPath string, opts SyncOptions) (*SyncResult, error) {
+	start := time.Now()
+
+	// Create destination directory
+	if err := os.MkdirAll(destPath, 0o755); err != nil {
+		return nil, fmt.Errorf("create dest dir: %w", err)
+	}
+
+	remotePath := source.RemotePath
+	if remotePath == "" {
+		remotePath = "/"
+	}
+
+	port := source.Port
+	if port == 0 {
+		port = 21
+	}
+
+	// Build exclude options for lftp mirror
+	var excludeArgs string
+	for _, pattern := range opts.Exclude {
+		excludeArgs += fmt.Sprintf(" --exclude %s", pattern)
+	}
+
+	// Build lftp mirror command
+	// --verbose shows what's being transferred
+	// --delete removes local files not on remote
+	// --only-newer downloads only newer files (incremental)
+	mirrorCmd := fmt.Sprintf(
+		"set ssl:verify-certificate no; set ftp:ssl-force true; set ftp:ssl-protect-data true; set ftp:ssl-protect-list true; mirror --verbose --only-newer --delete%s %s %s; quit",
+		excludeArgs, remotePath, destPath,
+	)
+
+	cmd := exec.CommandContext(ctx, lftpPath,
+		"-u", source.Username+","+source.Password,
+		"-p", strconv.Itoa(port),
+		"-e", mirrorCmd,
+		source.Host,
+	)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	err := cmd.Run()
+	duration := time.Since(start)
+	output := out.String()
+
+	result := parseLFTPMirrorOutput(output)
+	result.Duration = duration
+
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// lftp may exit non-zero for minor issues but still transfer files
+		result.Errors = append(result.Errors, fmt.Sprintf("lftp mirror warning: %v", err))
+	}
+
+	return result, nil
+}
+
+// parseLFTPMirrorOutput parses lftp mirror --verbose output to extract stats.
+// Lines like: "Transferring file `filename'" and "Total: X files, Y bytes"
+func parseLFTPMirrorOutput(output string) *SyncResult {
+	result := &SyncResult{}
+
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "Transferring file") || strings.Contains(line, "Getting file") {
+			result.FilesCopied++
+		}
+	}
+
+	// Try to parse "Total: N directories, M files, B bytes transferred"
+	reTotal := regexp.MustCompile(`(\d+)\s+files?.*?(\d[\d,]*)\s+bytes?\s+transferred`)
+	if m := reTotal.FindStringSubmatch(output); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			result.FilesCopied = n
+		}
+		bytesStr := strings.ReplaceAll(m[2], ",", "")
+		if b, err := strconv.ParseInt(bytesStr, 10, 64); err == nil {
+			result.BytesCopied = b
+		}
+	}
+
+	return result
+}
+
+// syncWithGoLib is the fallback using the Go FTP library (for plain FTP).
+func (f *FTPSyncer) syncWithGoLib(ctx context.Context, source SyncSource, destPath string, opts SyncOptions) (*SyncResult, error) {
 	start := time.Now()
 	result := &SyncResult{}
 
-	// ── 1. Connect ────────────────────────────────────────────────────────────
 	cfg := connector.FTPConfig{
 		Host:     source.Host,
 		Port:     source.Port,
