@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"os"
@@ -30,11 +31,38 @@ func NewFTPConnector(config FTPConfig) *FTPConnector {
 }
 
 // Connect dials the FTP server and authenticates with the configured credentials.
+// If UseTLS is true, uses explicit FTPS (FTP over TLS).
 func (c *FTPConnector) Connect() error {
 	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
-	conn, err := ftp.DialTimeout(addr, c.config.Timeout)
+
+	var opts []ftp.DialOption
+	opts = append(opts, ftp.DialWithTimeout(c.config.Timeout))
+
+	if c.config.UseTLS {
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: true, // many FTP servers use self-signed certs
+		}
+		opts = append(opts, ftp.DialWithExplicitTLS(tlsConfig))
+	}
+
+	conn, err := ftp.Dial(addr, opts...)
 	if err != nil {
-		return fmt.Errorf("ftp dial %s: %w", addr, err)
+		// If plain FTP fails and TLS wasn't requested, retry with TLS
+		// (server might require it)
+		if !c.config.UseTLS {
+			tlsConfig := &tls.Config{InsecureSkipVerify: true}
+			opts2 := []ftp.DialOption{
+				ftp.DialWithTimeout(c.config.Timeout),
+				ftp.DialWithExplicitTLS(tlsConfig),
+			}
+			conn2, err2 := ftp.Dial(addr, opts2...)
+			if err2 != nil {
+				return fmt.Errorf("ftp dial %s: %w (also tried TLS: %v)", addr, err, err2)
+			}
+			conn = conn2
+		} else {
+			return fmt.Errorf("ftps dial %s: %w", addr, err)
+		}
 	}
 
 	if err := conn.Login(c.config.Username, c.config.Password); err != nil {

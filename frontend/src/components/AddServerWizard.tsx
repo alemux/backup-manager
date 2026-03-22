@@ -32,6 +32,7 @@ interface ConnectionForm {
   password: string;
   authMethod: AuthMethod;
   privateKey: string;
+  useTLS?: boolean;
 }
 
 interface SourceEntry {
@@ -275,6 +276,7 @@ export default function AddServerWizard({ onClose }: WizardProps) {
         username: c.username,
         password: c.password,
         private_key: c.authMethod === 'key' ? c.privateKey : undefined,
+        use_tls: isWindows ? (c.useTLS ?? false) : false,
       });
       setStatus(res.success ? 'ok' : 'error');
       setMsg(res.message);
@@ -765,6 +767,18 @@ FLUSH PRIVILEGES;`;
             value={winConn.password}
             onChange={(e) => setWinConn({ ...winConn, password: e.target.value })}
           />
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={winConn.useTLS ?? false}
+              onChange={(e) => setWinConn({ ...winConn, useTLS: e.target.checked })}
+              className="w-4 h-4 accent-blue-600"
+            />
+            Use TLS/SSL (FTPS)
+          </label>
+          <p className="text-xs text-gray-400 mt-0.5">Enable if the FTP server requires encrypted connections</p>
         </div>
         <div className="flex items-center gap-3">
           <button

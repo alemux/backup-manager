@@ -61,4 +61,5 @@ type FTPConfig struct {
 	Username string
 	Password string
 	Timeout  time.Duration
+	UseTLS   bool // use explicit FTPS (FTP over TLS)
 }

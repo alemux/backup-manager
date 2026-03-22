@@ -255,6 +255,7 @@ func (h *ServersHandler) TestConnection(w http.ResponseWriter, r *http.Request) 
 		Username       string `json:"username"`
 		Password       string `json:"password"`
 		SSHKeyPath     string `json:"ssh_key_path"`
+		UseTLS         bool   `json:"use_tls"`
 	}
 
 	var req testRequest
@@ -321,6 +322,7 @@ func (h *ServersHandler) TestConnection(w http.ResponseWriter, r *http.Request) 
 			Username: req.Username,
 			Password: req.Password,
 			Timeout:  10 * time.Second,
+			UseTLS:   req.UseTLS,
 		})
 		if err := conn.Connect(); err != nil {
 			JSON(w, http.StatusOK, map[string]interface{}{
