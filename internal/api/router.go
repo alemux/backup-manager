@@ -104,6 +104,7 @@ func newRouterInternal(db *database.Database, authSvc *auth.Service, mgr *notifi
 	protected.HandleFunc("GET /api/servers/{id}", serversHandler.Get)
 	protected.HandleFunc("PUT /api/servers/{id}", serversHandler.Update)
 	protected.HandleFunc("DELETE /api/servers/{id}", serversHandler.Delete)
+	protected.HandleFunc("POST /api/servers/{id}/browse-ftp", serversHandler.BrowseFTPServer)
 	protected.HandleFunc("POST /api/servers/{id}/discover", serversHandler.Discover)
 	protected.HandleFunc("POST /api/servers/{id}/rescan", serversHandler.Rescan)
 	protected.HandleFunc("GET /api/servers/{id}/discovery", serversHandler.GetDiscovery)

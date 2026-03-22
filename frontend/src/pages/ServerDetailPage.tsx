@@ -14,6 +14,10 @@ import {
   Server,
   Clock,
   Plus,
+  Folder,
+  File,
+  ArrowUp,
+  AlertTriangle,
 } from 'lucide-react';
 import { serversApi } from '../api/servers';
 import type { DiscoveryChange } from '../api/servers';
@@ -145,6 +149,18 @@ export default function ServerDetailPage() {
   const [addingSource, setAddingSource] = useState(false);
   const [addSourceError, setAddSourceError] = useState<string | null>(null);
 
+  // FTP Content Management state
+  const [ftpBrowsing, setFtpBrowsing] = useState(false);
+  const [ftpLoading, setFtpLoading] = useState(false);
+  const [ftpError, setFtpError] = useState('');
+  const [ftpPath, setFtpPath] = useState('/');
+  const [ftpEntries, setFtpEntries] = useState<Array<{ name: string; path: string; is_dir: boolean; size: number }>>([]);
+  const [ftpExistingSources, setFtpExistingSources] = useState<string[]>([]);
+  const [ftpNewFolders, setFtpNewFolders] = useState<string[]>([]);
+  const [ftpMode, setFtpMode] = useState<'selective' | 'copy_all'>('selective');
+  const [ftpAddingPaths, setFtpAddingPaths] = useState<Record<string, boolean>>({});
+  const [deletingSourceId, setDeletingSourceId] = useState<number | null>(null);
+
   const handleAddSource = async () => {
     setAddingSource(true);
     setAddSourceError(null);
@@ -165,6 +181,86 @@ export default function ServerDetailPage() {
       setAddingSource(false);
     }
   };
+
+  const browseFTPServer = async (path: string) => {
+    setFtpLoading(true);
+    setFtpError('');
+    try {
+      const res = await serversApi.browseFTPServer(serverId, path);
+      setFtpPath(res.path);
+      setFtpEntries(res.entries);
+      setFtpExistingSources(res.existing_sources);
+      setFtpNewFolders(res.new_folders);
+      setFtpMode(res.mode);
+    } catch (e: unknown) {
+      setFtpError(e instanceof Error ? e.message : 'Failed to browse FTP');
+    } finally {
+      setFtpLoading(false);
+    }
+  };
+
+  const handleBrowseFTP = () => {
+    setFtpBrowsing(true);
+    browseFTPServer('/');
+  };
+
+  const handleAddFTPSource = async (entryPath: string, entryName: string) => {
+    setFtpAddingPaths((prev) => ({ ...prev, [entryPath]: true }));
+    try {
+      await serversApi.createSource(serverId, {
+        name: entryName,
+        type: 'web',
+        source_path: entryPath,
+      });
+      queryClient.invalidateQueries({ queryKey: ['server-sources', serverId] });
+      // Refresh the FTP listing to update existing_sources and new_folders
+      await browseFTPServer(ftpPath);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to add source');
+    } finally {
+      setFtpAddingPaths((prev) => ({ ...prev, [entryPath]: false }));
+    }
+  };
+
+  const handleSetCopyAll = async () => {
+    setFtpAddingPaths((prev) => ({ ...prev, '/': true }));
+    try {
+      await serversApi.createSource(serverId, {
+        name: 'FTP Root (Copy All)',
+        type: 'web',
+        source_path: '/',
+      });
+      queryClient.invalidateQueries({ queryKey: ['server-sources', serverId] });
+      await browseFTPServer('/');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to set copy all mode');
+    } finally {
+      setFtpAddingPaths((prev) => ({ ...prev, '/': false }));
+    }
+  };
+
+  const handleDeleteSource = async (sourceId: number) => {
+    setDeletingSourceId(sourceId);
+    try {
+      await serversApi.deleteSource(sourceId);
+      queryClient.invalidateQueries({ queryKey: ['server-sources', serverId] });
+      // Refresh FTP listing if browsing
+      if (ftpBrowsing) {
+        await browseFTPServer(ftpPath);
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to delete source');
+    } finally {
+      setDeletingSourceId(null);
+    }
+  };
+
+  function humanizeBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+  }
 
   const { data: server, isLoading: serverLoading, isError: serverError } = useQuery<ServerType>({
     queryKey: ['server', serverId],
@@ -326,6 +422,18 @@ export default function ServerDetailPage() {
                 >
                   {src.enabled ? 'Enabled' : 'Disabled'}
                 </span>
+                <button
+                  onClick={() => handleDeleteSource(src.id)}
+                  disabled={deletingSourceId === src.id}
+                  className="text-red-400 hover:text-red-600 transition-colors disabled:opacity-50 p-1"
+                  title="Remove source"
+                >
+                  {deletingSourceId === src.id ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={14} />
+                  )}
+                </button>
               </div>
             ))}
           </div>
@@ -412,6 +520,188 @@ export default function ServerDetailPage() {
           </div>
         )}
       </div>
+
+      {/* FTP Content Management (Windows/FTP servers only) */}
+      {server.connection_type === 'ftp' && (
+        <div className="bg-white border border-gray-200 rounded-xl p-6 mb-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-bold text-gray-800">FTP Content Management</h2>
+            <button
+              onClick={handleBrowseFTP}
+              disabled={ftpLoading}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 transition-colors disabled:opacity-60"
+            >
+              {ftpLoading ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <RefreshCw size={13} />
+              )}
+              {ftpBrowsing ? 'Refresh' : 'Browse FTP'}
+            </button>
+          </div>
+
+          {/* Mode indicator */}
+          {ftpBrowsing && (
+            <div className="mb-4 flex items-center gap-4">
+              <span className="text-sm text-gray-600 font-medium">Mode:</span>
+              <span
+                className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
+                  ftpMode === 'copy_all'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'bg-gray-100 text-gray-700'
+                }`}
+              >
+                {ftpMode === 'copy_all' ? 'Copy All' : 'Selective'}
+              </span>
+              {ftpMode === 'selective' && (
+                <button
+                  onClick={handleSetCopyAll}
+                  disabled={!!ftpAddingPaths['/']}
+                  className="text-xs text-blue-600 hover:underline disabled:opacity-50"
+                >
+                  {ftpAddingPaths['/'] ? 'Setting...' : 'Switch to Copy All'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* New folders alert */}
+          {ftpBrowsing && ftpNewFolders.length > 0 && ftpMode === 'selective' && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+              <AlertTriangle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800">
+                  {ftpNewFolders.length} new folder{ftpNewFolders.length !== 1 ? 's' : ''} detected!
+                </p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  These folders exist on the FTP server but are not included in any backup source.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {ftpError && (
+            <div className="flex items-center gap-2 text-red-600 text-sm mb-3">
+              <AlertCircle size={14} /> {ftpError}
+            </div>
+          )}
+
+          {ftpBrowsing && !ftpLoading && !ftpError && (
+            <>
+              {/* Path bar + navigation */}
+              {ftpMode !== 'copy_all' && (
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xs text-gray-500 font-medium">Path:</span>
+                  <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded flex-1 truncate">
+                    {ftpPath}
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (ftpPath === '/') return;
+                      const parts = ftpPath.split('/').filter(Boolean);
+                      parts.pop();
+                      const parent = parts.length === 0 ? '/' : '/' + parts.join('/');
+                      browseFTPServer(parent);
+                    }}
+                    disabled={ftpPath === '/' || ftpLoading}
+                    className="flex items-center gap-1 text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-40 transition-colors"
+                  >
+                    <ArrowUp size={12} /> Up
+                  </button>
+                </div>
+              )}
+
+              {/* Entry list */}
+              {ftpEntries.length === 0 ? (
+                <p className="text-gray-400 text-sm py-4 text-center">Empty directory</p>
+              ) : (
+                <div className="border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100">
+                  {ftpEntries.map((entry) => {
+                    const isExistingSource = ftpExistingSources.includes(entry.path);
+                    const isNewFolder = ftpNewFolders.includes(entry.path);
+                    const isAdding = !!ftpAddingPaths[entry.path];
+
+                    return (
+                      <div
+                        key={entry.path}
+                        className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${
+                          isNewFolder ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="flex-shrink-0 text-gray-400">
+                          {entry.is_dir ? (
+                            <Folder size={15} className="text-yellow-500" />
+                          ) : (
+                            <File size={15} />
+                          )}
+                        </span>
+                        <span className="flex-1 text-sm truncate font-medium text-gray-800">
+                          {entry.name}
+                        </span>
+
+                        {/* Status badges */}
+                        {isExistingSource && (
+                          <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full flex-shrink-0">
+                            backed up
+                          </span>
+                        )}
+                        {isNewFolder && (
+                          <span className="text-xs font-bold text-amber-700 bg-amber-200 px-2 py-0.5 rounded-full flex-shrink-0">
+                            NEW
+                          </span>
+                        )}
+
+                        {!entry.is_dir && (
+                          <span className="text-xs text-gray-400 flex-shrink-0">
+                            {humanizeBytes(entry.size)}
+                          </span>
+                        )}
+
+                        {/* Actions */}
+                        {entry.is_dir && !isExistingSource && ftpMode !== 'copy_all' && (
+                          <button
+                            onClick={() => handleAddFTPSource(entry.path, entry.name)}
+                            disabled={isAdding}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex-shrink-0 whitespace-nowrap"
+                          >
+                            {isAdding ? (
+                              <Loader2 size={11} className="animate-spin" />
+                            ) : (
+                              <Plus size={11} />
+                            )}
+                            Add source
+                          </button>
+                        )}
+
+                        {entry.is_dir && (
+                          <button
+                            onClick={() => browseFTPServer(entry.path)}
+                            className="text-xs text-blue-600 hover:text-blue-700 flex-shrink-0 px-2 py-0.5 rounded hover:bg-blue-50 transition-colors"
+                          >
+                            Browse
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
+          {ftpLoading && (
+            <div className="flex items-center gap-2 py-6 justify-center text-gray-500">
+              <Loader2 size={18} className="animate-spin" /> Connecting to FTP server...
+            </div>
+          )}
+
+          {!ftpBrowsing && (
+            <p className="text-sm text-gray-400">
+              Click "Browse FTP" to view and manage folders on this server.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Discovery (Linux only) */}
       {server.type === 'linux' && (

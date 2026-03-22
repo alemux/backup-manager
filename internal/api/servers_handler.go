@@ -339,6 +339,173 @@ func (h *ServersHandler) BrowseFTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// BrowseFTPServer handles POST /api/servers/{id}/browse-ftp
+// Uses the server's saved (encrypted) credentials to connect and list FTP contents.
+// Also returns existing sources and detects new folders not covered by any source.
+func (h *ServersHandler) BrowseFTPServer(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	// Parse optional path from request body
+	type browseReq struct {
+		Path string `json:"path"`
+	}
+	var req browseReq
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req) // ignore decode errors; path defaults to "/"
+	}
+	if req.Path == "" {
+		req.Path = "/"
+	}
+
+	// Fetch server credentials
+	type serverRow struct {
+		host           string
+		port           int
+		connectionType string
+		username       string
+		password       sql.NullString
+	}
+	var row serverRow
+	err := h.db.DB().QueryRowContext(r.Context(),
+		`SELECT host, port, connection_type, COALESCE(username,''), encrypted_password
+		 FROM servers WHERE id=?`, id,
+	).Scan(&row.host, &row.port, &row.connectionType, &row.username, &row.password)
+	if err == sql.ErrNoRows {
+		Error(w, http.StatusNotFound, "server not found")
+		return
+	}
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "failed to query server")
+		return
+	}
+
+	if row.connectionType != "ftp" {
+		Error(w, http.StatusBadRequest, "browse-ftp is only supported for FTP servers")
+		return
+	}
+
+	password := ""
+	if row.password.Valid {
+		decPassword, err := h.decryptCred(row.password.String)
+		if err != nil {
+			Error(w, http.StatusInternalServerError, "failed to decrypt server password")
+			return
+		}
+		password = decPassword
+	}
+
+	port := row.port
+	if port == 0 {
+		port = 21
+	}
+
+	conn := connector.NewFTPConnector(connector.FTPConfig{
+		Host:     row.host,
+		Port:     port,
+		Username: row.username,
+		Password: password,
+		Timeout:  15 * time.Second,
+	})
+	if err := conn.Connect(); err != nil {
+		Error(w, http.StatusBadGateway, fmt.Sprintf("FTP connection failed: %v", err))
+		return
+	}
+	defer conn.Close()
+
+	files, err := conn.ListFiles(r.Context(), req.Path)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, fmt.Sprintf("FTP list failed: %v", err))
+		return
+	}
+
+	type ftpEntry struct {
+		Name  string `json:"name"`
+		Path  string `json:"path"`
+		IsDir bool   `json:"is_dir"`
+		Size  int64  `json:"size"`
+	}
+
+	entries := make([]ftpEntry, 0, len(files))
+	for _, f := range files {
+		name := f.Path
+		prefix := req.Path
+		if len(prefix) > 0 && prefix[len(prefix)-1] != '/' {
+			prefix += "/"
+		}
+		if len(f.Path) > len(prefix) && f.Path[:len(prefix)] == prefix {
+			name = f.Path[len(prefix):]
+		}
+
+		entryPath := req.Path
+		if len(entryPath) == 0 || entryPath[len(entryPath)-1] != '/' {
+			entryPath += "/"
+		}
+		if entryPath == "/" {
+			entryPath = "/" + name
+		} else {
+			entryPath = entryPath + name
+		}
+
+		entries = append(entries, ftpEntry{
+			Name:  name,
+			Path:  entryPath,
+			IsDir: f.IsDir,
+			Size:  f.Size,
+		})
+	}
+
+	// Load existing backup sources for this server
+	sourceRows, err := h.db.DB().QueryContext(r.Context(),
+		`SELECT COALESCE(source_path,'') FROM backup_sources WHERE server_id=? AND enabled=1`, id)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "failed to query sources")
+		return
+	}
+	defer sourceRows.Close()
+
+	existingSources := make([]string, 0)
+	isCopyAll := false
+	for sourceRows.Next() {
+		var sp string
+		if err := sourceRows.Scan(&sp); err == nil && sp != "" {
+			existingSources = append(existingSources, sp)
+			if sp == "/" {
+				isCopyAll = true
+			}
+		}
+	}
+
+	// Detect new folders: directories on FTP root that have no matching source
+	newFolders := make([]string, 0)
+	if req.Path == "/" && !isCopyAll {
+		sourceSet := make(map[string]bool, len(existingSources))
+		for _, sp := range existingSources {
+			sourceSet[sp] = true
+		}
+		for _, entry := range entries {
+			if entry.IsDir && !sourceSet[entry.Path] {
+				newFolders = append(newFolders, entry.Path)
+			}
+		}
+	}
+
+	mode := "selective"
+	if isCopyAll {
+		mode = "copy_all"
+	}
+
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"path":             req.Path,
+		"entries":          entries,
+		"existing_sources": existingSources,
+		"new_folders":      newFolders,
+		"mode":             mode,
+	})
+}
+
 // TestConnection handles POST /api/servers/test-connection
 // Tests SSH or FTP connectivity without saving the server.
 func (h *ServersHandler) TestConnection(w http.ResponseWriter, r *http.Request) {

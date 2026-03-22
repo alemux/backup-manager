@@ -45,6 +45,19 @@ export const serversApi = {
       '/api/servers/browse-ftp',
       { method: 'POST', body: JSON.stringify(data) }
     ),
+  browseFTPServer: (serverId: number, path?: string) =>
+    request<{
+      path: string;
+      entries: Array<{ name: string; path: string; is_dir: boolean; size: number }>;
+      existing_sources: string[];
+      new_folders: string[];
+      mode: 'selective' | 'copy_all';
+    }>(`/api/servers/${serverId}/browse-ftp`, {
+      method: 'POST',
+      body: JSON.stringify({ path: path || '/' }),
+    }),
+  deleteSource: (sourceId: number) =>
+    request<void>(`/api/sources/${sourceId}`, { method: 'DELETE' }),
   rescan: (id: number) =>
     request<RescanResult>(`/api/servers/${id}/rescan`, { method: 'POST' }),
   getPreviousDiscovery: (id: number) =>
