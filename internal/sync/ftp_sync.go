@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,17 +65,24 @@ func (f *FTPSyncer) syncWithLFTP(ctx context.Context, lftpPath string, source Sy
 	}
 
 	// Build exclude options for lftp mirror
+	// Use --exclude-glob (not --exclude which expects regex)
 	var excludeArgs string
 	for _, pattern := range opts.Exclude {
-		excludeArgs += fmt.Sprintf(" --exclude %s", pattern)
+		excludeArgs += fmt.Sprintf(" --exclude-glob %s", pattern)
 	}
 
 	// Build lftp mirror command
 	// --verbose shows what's being transferred
 	// --delete removes local files not on remote
 	// --only-newer downloads only newer files (incremental)
+	// mirror --continue: resume interrupted transfers
+	// mirror --delete: remove local files not on remote
+	// mirror --verbose: show what's happening
+	// mirror --use-pget-n=3: use 3 parallel connections per file for speed
+	// Do NOT use --only-newer: it skips files with matching timestamps even if size differs
+	// Quote paths to handle spaces and special characters (e.g., "FTP Root (Copy All)")
 	mirrorCmd := fmt.Sprintf(
-		"set ssl:verify-certificate no; set ftp:ssl-force true; set ftp:ssl-protect-data true; set ftp:ssl-protect-list true; mirror --verbose --only-newer --delete%s %s %s; quit",
+		`set ssl:verify-certificate no; set ftp:ssl-force true; set ftp:ssl-protect-data true; set ftp:ssl-protect-list true; set net:max-retries 3; mirror --delete --verbose%s "%s" "%s"; quit`,
 		excludeArgs, remotePath, destPath,
 	)
 
@@ -92,6 +100,19 @@ func (f *FTPSyncer) syncWithLFTP(ctx context.Context, lftpPath string, source Sy
 	err := cmd.Run()
 	duration := time.Since(start)
 	output := out.String()
+
+	// Log the lftp output for debugging
+	log.Printf("[FTP SYNC] lftp mirror command: %s@%s:%d %s -> %s", source.Username, source.Host, port, remotePath, destPath)
+	if len(output) > 500 {
+		log.Printf("[FTP SYNC] lftp output (first 500 chars): %s", output[:500])
+	} else if output != "" {
+		log.Printf("[FTP SYNC] lftp output: %s", output)
+	} else {
+		log.Printf("[FTP SYNC] lftp produced no output")
+	}
+	if err != nil {
+		log.Printf("[FTP SYNC] lftp exit error: %v", err)
+	}
 
 	result := parseLFTPMirrorOutput(output)
 	result.Duration = duration

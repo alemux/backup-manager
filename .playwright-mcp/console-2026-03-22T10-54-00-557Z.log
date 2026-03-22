@@ -1,0 +1,118 @@
+[  298246ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[  300249ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[  302578ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[  303581ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[  304251ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[  305584ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[  309586ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[  312254ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[  317543ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[  318546ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[  320549ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[  324551ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[  328257ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[  419203ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[  557882ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[  559885ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1035700ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1037702ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1286429ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1288432ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1292435ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1299810ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[ 1300438ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1300812ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[ 1302814ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[ 1306817ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[ 1314684ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1315688ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1316440ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1317689ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1321691ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1346443ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1351696ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1352699ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1354701ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1358704ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1376446ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1388708ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1389711ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1391714ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1395716ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1406449ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1425719ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1426722ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1428725ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1432729ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1436451ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1462733ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1463737ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1465739ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1466453ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1469744ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1496456ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1499747ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1500750ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1502753ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1506756ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1526458ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1536759ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1537762ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1539765ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1543768ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1556461ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1573770ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1574772ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1576774ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1580778ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1586464ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1610781ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1611784ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1613788ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1616466ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1617791ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1646469ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1647794ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1648796ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1650800ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1654803ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1676471ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1684807ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1685810ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1687811ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1691814ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1706475ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1721817ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1722821ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1724824ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1728829ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1736478ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1758831ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1759834ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1761837ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1765839ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1766479ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1795841ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1796482ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1796844ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1798847ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1802851ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1826484ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 1832854ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1833856ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1835860ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1839862ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 1856488ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 2293637ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 2295639ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 2299640ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 2304999ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[ 2306003ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[ 2307643ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 2308007ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[ 2312011ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/runs?page=1&per_page=10:0
+[ 2319938ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 2320940ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 2322943ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
+[ 2323646ms] [ERROR] WebSocket connection to 'ws://localhost:8080/ws/logs' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/assets/index-fioUv5Dq.js:463
+[ 2326947ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8080/api/jobs:0
