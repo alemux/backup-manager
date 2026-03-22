@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -195,10 +196,8 @@ func (o *Orchestrator) AnalyzeJob(ctx context.Context, jobID int) (*AnalysisResu
 		Sources: make([]AnalysisSourceResult, 0, len(sources)),
 	}
 
-	rsyncSyncer, ok := o.rsyncSyncer.(*sync.RsyncSyncer)
-	if !ok {
-		return nil, fmt.Errorf("analysis requires rsync syncer")
-	}
+	// Choose analysis method based on server type
+	isSSH := server.Type == "linux" || server.ConnectionType == "ssh"
 
 	for _, src := range sources {
 		if ctx.Err() != nil {
@@ -217,47 +216,140 @@ func (o *Orchestrator) AnalyzeJob(ctx context.Context, jobID int) (*AnalysisResu
 			continue
 		}
 
-		currentPath := o.buildCurrentPath(server.Name, src.Type, src.Name)
-		excludes := o.buildExcludes(src.ExcludePatterns)
+		if isSSH {
+			// SSH/Linux: use rsync --dry-run
+			rsyncSyncer, ok := o.rsyncSyncer.(*sync.RsyncSyncer)
+			if !ok {
+				asr.Error = "rsync syncer not available"
+				result.Sources = append(result.Sources, asr)
+				continue
+			}
 
-		source := sync.SyncSource{
-			Host:       server.Host,
-			Port:       server.Port,
-			Username:   server.Username,
-			Password:   server.Password,
-			KeyPath:    server.SSHKeyPath,
-			RemotePath: src.SourcePath,
-		}
-		opts := sync.SyncOptions{
-			Exclude: excludes,
-			Delete:  true,
-		}
-		if job.BandwidthLimit != nil {
-			opts.BandwidthLimitKBps = *job.BandwidthLimit * 1024
-		}
+			currentPath := o.buildCurrentPath(server.Name, src.Type, src.Name)
+			excludes := o.buildExcludes(src.ExcludePatterns)
 
-		dryResult, err := rsyncSyncer.DryRun(ctx, source, currentPath, opts)
-		if err != nil {
-			asr.Error = err.Error()
-			result.Sources = append(result.Sources, asr)
-			continue
-		}
+			source := sync.SyncSource{
+				Host:       server.Host,
+				Port:       server.Port,
+				Username:   server.Username,
+				Password:   server.Password,
+				KeyPath:    server.SSHKeyPath,
+				RemotePath: src.SourcePath,
+			}
+			opts := sync.SyncOptions{
+				Exclude: excludes,
+				Delete:  true,
+			}
+			if job.BandwidthLimit != nil {
+				opts.BandwidthLimitKBps = *job.BandwidthLimit * 1024
+			}
 
-		asr.TotalFiles = dryResult.TotalFiles
-		asr.FilesToTransfer = dryResult.FilesToTransfer
-		asr.BytesToTransfer = dryResult.BytesToTransfer
-		asr.BytesTotal = dryResult.BytesTotal
-		asr.HumanSize = dryResult.HumanSize
-		asr.HumanTotal = sync.HumanizeBytes(dryResult.BytesTotal)
+			dryResult, err := rsyncSyncer.DryRun(ctx, source, currentPath, opts)
+			if err != nil {
+				asr.Error = err.Error()
+				result.Sources = append(result.Sources, asr)
+				continue
+			}
+
+			asr.TotalFiles = dryResult.TotalFiles
+			asr.FilesToTransfer = dryResult.FilesToTransfer
+			asr.BytesToTransfer = dryResult.BytesToTransfer
+			asr.BytesTotal = dryResult.BytesTotal
+			asr.HumanSize = dryResult.HumanSize
+			asr.HumanTotal = sync.HumanizeBytes(dryResult.BytesTotal)
+		} else {
+			// FTP/Windows: use lftp to list remote files and calculate total size
+			ftpResult, err := o.analyzeFTPSource(ctx, server, src)
+			if err != nil {
+				asr.Error = err.Error()
+				result.Sources = append(result.Sources, asr)
+				continue
+			}
+			asr.TotalFiles = ftpResult.TotalFiles
+			asr.FilesToTransfer = ftpResult.TotalFiles // FTP can't tell what changed
+			asr.BytesToTransfer = ftpResult.BytesTotal
+			asr.BytesTotal = ftpResult.BytesTotal
+			asr.HumanSize = sync.HumanizeBytes(ftpResult.BytesTotal)
+			asr.HumanTotal = asr.HumanSize
+		}
 
 		result.Sources = append(result.Sources, asr)
-		result.TotalBytesToTransfer += dryResult.BytesToTransfer
-		result.TotalBytesAll += dryResult.BytesTotal
-		result.TotalFilesToTransfer += dryResult.FilesToTransfer
+		result.TotalBytesToTransfer += asr.BytesToTransfer
+		result.TotalBytesAll += asr.BytesTotal
+		result.TotalFilesToTransfer += asr.FilesToTransfer
 	}
 
 	result.HumanTotalTransfer = sync.HumanizeBytes(result.TotalBytesToTransfer)
 	result.HumanTotalAll = sync.HumanizeBytes(result.TotalBytesAll)
+
+	return result, nil
+}
+
+// ftpAnalysisResult holds the result of an FTP source analysis.
+type ftpAnalysisResult struct {
+	TotalFiles int
+	BytesTotal int64
+}
+
+// analyzeFTPSource uses lftp to recursively list a remote FTP directory
+// and calculate total file count and size.
+func (o *Orchestrator) analyzeFTPSource(ctx context.Context, server serverRecord, src BackupSourceRecord) (*ftpAnalysisResult, error) {
+	lftpPath, err := exec.LookPath("lftp")
+	if err != nil {
+		return nil, fmt.Errorf("lftp not installed (needed for FTP analysis)")
+	}
+
+	remotePath := src.SourcePath
+	if remotePath == "" {
+		remotePath = "/"
+	}
+
+	// Use lftp `du -s` to get total size, and `find` to count files
+	lftpCmd := fmt.Sprintf(
+		"set ssl:verify-certificate no; set ftp:ssl-force true; set ftp:ssl-protect-data true; set ftp:ssl-protect-list true; du -s %s; find %s | wc -l; quit",
+		remotePath, remotePath,
+	)
+
+	port := server.Port
+	if port == 0 {
+		port = 21
+	}
+
+	cmd := exec.CommandContext(ctx, lftpPath,
+		"-u", server.Username+","+server.Password,
+		"-p", strconv.Itoa(port),
+		"-e", lftpCmd,
+		server.Host,
+	)
+	var out strings.Builder
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	if err := cmd.Run(); err != nil {
+		// Even on error, try to parse partial output
+		_ = err
+	}
+
+	result := &ftpAnalysisResult{}
+	lines := strings.Split(out.String(), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			// du -s output: "12345\t/path" (size in KB)
+			if size, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
+				result.BytesTotal = size * 1024 // du reports in KB
+			}
+		} else if len(fields) == 1 {
+			// wc -l output: just a number (file count)
+			if count, err := strconv.Atoi(fields[0]); err == nil && count > 0 {
+				result.TotalFiles = count
+			}
+		}
+	}
 
 	return result, nil
 }
